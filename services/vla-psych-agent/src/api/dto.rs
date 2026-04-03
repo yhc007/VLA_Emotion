@@ -169,6 +169,33 @@ pub struct BoundingBoxDto {
     pub height: f32,
 }
 
+// ─── LLM Report ───
+
+#[derive(Debug, Deserialize)]
+pub struct GenerateReportRequest {
+    pub session_id: Uuid,
+    pub conversation_summary: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PsychReportResponse {
+    pub session_id: Uuid,
+    pub report: crate::llm::PsychReport,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CounselorSuggestRequest {
+    pub session_id: Uuid,
+    pub last_utterance: String,
+    pub context: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CounselorSuggestionResponse {
+    pub session_id: Uuid,
+    pub suggestion: crate::llm::CounselorSuggestion,
+}
+
 // ─── Error ───
 
 #[derive(Debug, Serialize)]

@@ -440,3 +440,116 @@ pub async fn analyze_face(
     }))
 }
 
+
+
+/// POST /api/v1/report/generate
+/// 
+/// Claude를 활용해 심리 분석 리포트 생성
+pub async fn generate_report(
+    State(state): State<AppState>,
+    Json(req): Json<GenerateReportRequest>,
+) -> Result<Json<PsychReportResponse>, (StatusCode, Json<ErrorResponse>)> {
+    use crate::llm::PsychReporter;
+
+    // 세션 확인
+    let agent = match state.get_session(&req.session_id).await {
+        Some(agent) => agent,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "SESSION_NOT_FOUND".to_string(),
+                    message: format!("세션 {}를 찾을 수 없습니다", req.session_id),
+                }),
+            ));
+        }
+    };
+
+    // 세션 상태 가져오기
+    let (psych_state, _, _, _) = agent.get_session_stats();
+
+    // PsychReporter 초기화
+    let reporter = PsychReporter::from_env().map_err(|e| {
+        error!(error = %e, "PsychReporter 초기화 실패");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "REPORTER_INIT_ERROR".to_string(),
+            message: format!("리포트 생성기 초기화 실패: {} (ANTHROPIC_API_KEY 설정 필요)", e),
+        }))
+    })?;
+
+    info!(session_id = %req.session_id, "심리 리포트 생성 시작");
+
+    // 리포트 생성 (triples와 alerts는 현재 세션에서 가져올 수 없으므로 빈 배열로)
+    let report = reporter.generate_report(
+        &psych_state,
+        &[], // TODO: 세션에서 최근 triples 가져오기
+        &[], // TODO: 세션에서 alerts 가져오기
+        req.conversation_summary.as_deref(),
+    ).await.map_err(|e| {
+        error!(error = %e, "리포트 생성 실패");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "REPORT_GENERATION_ERROR".to_string(),
+            message: format!("리포트 생성 실패: {}", e),
+        }))
+    })?;
+
+    info!(session_id = %req.session_id, risk_level = %report.risk_level, "리포트 생성 완료");
+
+    Ok(Json(PsychReportResponse {
+        session_id: req.session_id,
+        report,
+    }))
+}
+
+/// POST /api/v1/counselor/suggest
+/// 
+/// 상담사 추천 응답 생성
+pub async fn suggest_counselor_response(
+    State(state): State<AppState>,
+    Json(req): Json<CounselorSuggestRequest>,
+) -> Result<Json<CounselorSuggestionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    use crate::llm::PsychReporter;
+
+    // 세션 확인
+    let agent = match state.get_session(&req.session_id).await {
+        Some(agent) => agent,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "SESSION_NOT_FOUND".to_string(),
+                    message: format!("세션 {}를 찾을 수 없습니다", req.session_id),
+                }),
+            ));
+        }
+    };
+
+    let (psych_state, _, _, _) = agent.get_session_stats();
+
+    let reporter = PsychReporter::from_env().map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "REPORTER_INIT_ERROR".to_string(),
+            message: format!("초기화 실패: {}", e),
+        }))
+    })?;
+
+    info!(session_id = %req.session_id, "상담사 추천 응답 생성 시작");
+
+    let suggestion = reporter.suggest_response(
+        &psych_state,
+        &req.last_utterance,
+        req.context.as_deref(),
+    ).await.map_err(|e| {
+        error!(error = %e, "추천 응답 생성 실패");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "SUGGESTION_ERROR".to_string(),
+            message: format!("추천 응답 생성 실패: {}", e),
+        }))
+    })?;
+
+    Ok(Json(CounselorSuggestionResponse {
+        session_id: req.session_id,
+        suggestion,
+    }))
+}
+

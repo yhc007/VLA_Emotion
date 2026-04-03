@@ -11,6 +11,7 @@ mod actors;
 mod api;
 mod speech;
 mod vision;
+mod llm;
 
 use actors::VlaPsychAgent;
 use types::*;
@@ -72,6 +73,8 @@ async fn run_server() -> anyhow::Result<()> {
     info!("   POST /api/v1/analyze/text       - 텍스트 분석");
     info!("   POST /api/v1/analyze/audio      - 🎤 음성 분석 (Whisper)");
     info!("   POST /api/v1/analyze/face       - 😊 표정 분석 (Azure Face)");
+    info!("   POST /api/v1/report/generate    - 🧠 AI 심리 리포트 (Claude)");
+    info!("   POST /api/v1/counselor/suggest  - 💬 상담사 추천 응답 (Claude)");
     info!("   GET  /api/v1/session/:id/state  - 심리 상태 조회");
     info!("   GET  /api/v1/session/:id/graph  - 그래프 조회");
     info!("");
