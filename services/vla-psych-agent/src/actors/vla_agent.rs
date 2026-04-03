@@ -13,6 +13,7 @@ use crate::types::*;
 ///
 /// pekko-agent의 AgentActor 트레이트를 구현하여
 /// 음성/표정 → SPO → 의미 그래프 → 심리 분석 파이프라인을 수행한다.
+#[derive(Clone)]
 pub struct VlaPsychAgent {
     agent_id: String,
     state: AgentState,
@@ -129,6 +130,21 @@ impl VlaPsychAgent {
     /// 그래프 요약 반환
     pub fn graph_summary(&self) -> String {
         self.semantic_graph.summary()
+    }
+
+    /// 세션 통계 반환
+    pub fn get_session_stats(&self) -> (PsychState, usize, usize, usize) {
+        let session_id = self.active_session.unwrap_or_else(Uuid::new_v4);
+        let psych_state = self.psych_analyzer.analyze(session_id);
+        let utterance_count = self.psych_analyzer.utterance_count();
+        let node_count = self.semantic_graph.node_count();
+        let edge_count = self.semantic_graph.edge_count();
+        (psych_state, utterance_count, node_count, edge_count)
+    }
+
+    /// 그래프 데이터 반환 (노드, 엣지)
+    pub fn get_graph_data(&self) -> (Vec<(String, String, String)>, Vec<(String, String, String, f32)>) {
+        self.semantic_graph.export_for_visualization()
     }
 }
 

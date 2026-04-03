@@ -8,6 +8,7 @@ use uuid::Uuid;
 ///
 /// Phase 1에서는 조사 기반 규칙으로 동작하며,
 /// 향후 LLM 기반 추출기로 교체/보강 가능하다.
+#[derive(Clone)]
 pub struct SPOExtractor {
     /// 직전 발화의 주어 (주어 생략 시 승계용)
     last_subject: Option<Entity>,

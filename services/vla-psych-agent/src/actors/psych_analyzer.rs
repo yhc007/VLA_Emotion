@@ -6,6 +6,7 @@ use tracing::{debug, warn};
 ///
 /// 의미 그래프의 SPO 패턴과 감정 데이터를 종합하여
 /// 실시간 심리 상태를 추론하고 이상 패턴을 탐지한다.
+#[derive(Clone)]
 pub struct PsychAnalyzer {
     /// 최근 감정 기록 (슬라이딩 윈도우)
     emotion_history: Vec<EmotionResult>,
@@ -45,6 +46,11 @@ impl PsychAnalyzer {
     /// 말-표정 불일치 기록
     pub fn record_mismatch(&mut self) {
         self.mismatch_count += 1;
+    }
+
+    /// 발화(SPO) 기록 수
+    pub fn utterance_count(&self) -> usize {
+        self.spo_history.len()
     }
 
     /// 종합 심리 상태 분석

@@ -1,7 +1,14 @@
+//! VLA 심리분석 에이전트
+//!
+//! 실행 모드:
+//! - 서버 모드 (기본): `cargo run`
+//! - 데모 모드: `cargo run -- --demo`
+
 mod types;
 mod spo;
 mod graph;
 mod actors;
+mod api;
 
 use actors::VlaPsychAgent;
 use types::*;
@@ -9,20 +16,76 @@ use pekko_agent_core::*;
 use pekko_agent_events::schema::AgentEventEnvelope;
 use pekko_agent_events::publisher::EventPublisher;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use tracing::{info, error, warn};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RunMode {
+    Server,
+    Demo,
+}
+
+fn parse_args() -> RunMode {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--demo") {
+        RunMode::Demo
+    } else {
+        RunMode::Server
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 로깅 초기화
     tracing_subscriber::fmt()
-        .with_env_filter("info,vla_psych_agent=debug")
+        .with_env_filter("info,vla_psych_agent=debug,tower_http=debug")
         .with_target(false)
         .with_level(true)
         .init();
 
+    let mode = parse_args();
+
+    match mode {
+        RunMode::Server => run_server().await,
+        RunMode::Demo => run_demo().await,
+    }
+}
+
+/// HTTP API 서버 모드
+async fn run_server() -> anyhow::Result<()> {
     info!("═══════════════════════════════════════════════════════");
-    info!("  🧠 VLA 심리분석 에이전트 시작");
+    info!("  🧠 VLA 심리분석 에이전트 — HTTP API 서버");
+    info!("═══════════════════════════════════════════════════════");
+
+    let state = api::AppState::new();
+    let app = api::create_router(state);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    info!("🚀 서버 시작: http://{}", addr);
+    info!("");
+    info!("📡 엔드포인트:");
+    info!("   GET  /health                    - 헬스 체크");
+    info!("   POST /api/v1/session/start      - 세션 시작");
+    info!("   POST /api/v1/analyze/text       - 텍스트 분석");
+    info!("   GET  /api/v1/session/:id/state  - 심리 상태 조회");
+    info!("   GET  /api/v1/session/:id/graph  - 그래프 조회");
+    info!("");
+    info!("🔌 WebSocket:");
+    info!("   WS   /ws                        - 새 세션 + 실시간 스트리밍");
+    info!("   WS   /ws/:id                    - 기존 세션 연결");
+    info!("");
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+/// 데모 모드 (기존 시뮬레이션)
+async fn run_demo() -> anyhow::Result<()> {
+    info!("═══════════════════════════════════════════════════════");
+    info!("  🧠 VLA 심리분석 에이전트 — 데모 모드");
     info!("  Phase 1 POC — 텍스트 → SPO → 그래프 → 심리 분석");
     info!("═══════════════════════════════════════════════════════");
 

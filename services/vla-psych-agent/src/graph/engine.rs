@@ -10,6 +10,7 @@ use uuid::Uuid;
 ///
 /// SPO 트리플과 감정 데이터를 노드/엣지로 변환하여
 /// 실시간 의미 그래프를 구축한다.
+#[derive(Clone)]
 pub struct SemanticGraph {
     graph: DiGraph<GraphNode, GraphEdge>,
     /// 엔티티 ID → NodeIndex 매핑
@@ -257,6 +258,40 @@ impl SemanticGraph {
             self.graph.edge_count(),
             node_types,
         )
+    }
+
+    /// 시각화용 그래프 데이터 내보내기
+    /// 반환: (노드 목록, 엣지 목록)
+    /// 노드: (id, label, type)
+    /// 엣지: (source, target, label, weight)
+    pub fn export_for_visualization(&self) -> (Vec<(String, String, String)>, Vec<(String, String, String, f32)>) {
+        let nodes: Vec<(String, String, String)> = self.graph
+            .node_indices()
+            .map(|idx| {
+                let node = &self.graph[idx];
+                (
+                    node.id.clone(),
+                    node.label.clone(),
+                    format!("{:?}", node.node_type),
+                )
+            })
+            .collect();
+
+        let edges: Vec<(String, String, String, f32)> = self.graph
+            .edge_indices()
+            .filter_map(|idx| {
+                let edge = self.graph.edge_weight(idx)?;
+                let (src_idx, tgt_idx) = self.graph.edge_endpoints(idx)?;
+                Some((
+                    self.graph[src_idx].id.clone(),
+                    self.graph[tgt_idx].id.clone(),
+                    edge.relation.clone(),
+                    edge.weight,
+                ))
+            })
+            .collect();
+
+        (nodes, edges)
     }
 
     // ─── 내부 헬퍼 ───
