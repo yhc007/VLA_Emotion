@@ -1,14 +1,15 @@
 //! API Handlers
 
 use axum::{
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::StatusCode,
     Json,
 };
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 
 use crate::types::EmotionResult;
+use crate::speech::{OpenAIWhisper, SpeechTranscriber, AudioFormat};
 use super::dto::*;
 use super::state::AppState;
 
@@ -154,5 +155,167 @@ pub async fn get_session_graph(
             label,
             weight,
         }).collect(),
+    }))
+}
+
+/// POST /api/v1/analyze/audio
+/// 
+/// 음성 파일 업로드 → Whisper 변환 → VLA 분석
+pub async fn analyze_audio(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<AudioAnalyzeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let mut session_id: Option<Uuid> = None;
+    let mut audio_data: Option<Vec<u8>> = None;
+    let mut audio_format: Option<AudioFormat> = None;
+    let mut emotion_input: Option<EmotionInput> = None;
+
+    // multipart 필드 파싱
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MULTIPART_ERROR".to_string(),
+            message: e.to_string(),
+        }))
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        
+        match name.as_str() {
+            "session_id" => {
+                let text = field.text().await.map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "FIELD_ERROR".to_string(),
+                        message: format!("session_id 읽기 실패: {}", e),
+                    }))
+                })?;
+                session_id = Some(Uuid::parse_str(&text).map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "INVALID_UUID".to_string(),
+                        message: format!("잘못된 session_id: {}", e),
+                    }))
+                })?);
+            }
+            "audio" => {
+                // 파일명에서 형식 추출
+                if let Some(filename) = field.file_name() {
+                    let ext = std::path::Path::new(filename)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("wav");
+                    audio_format = AudioFormat::from_extension(ext);
+                }
+                
+                audio_data = Some(field.bytes().await.map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "AUDIO_READ_ERROR".to_string(),
+                        message: format!("오디오 읽기 실패: {}", e),
+                    }))
+                })?.to_vec());
+            }
+            "emotion" => {
+                let text = field.text().await.map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "FIELD_ERROR".to_string(),
+                        message: format!("emotion 읽기 실패: {}", e),
+                    }))
+                })?;
+                emotion_input = serde_json::from_str(&text).ok();
+            }
+            _ => {}
+        }
+    }
+
+    // 필수 필드 확인
+    let session_id = session_id.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MISSING_SESSION_ID".to_string(),
+            message: "session_id가 필요합니다".to_string(),
+        }))
+    })?;
+
+    let audio_data = audio_data.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MISSING_AUDIO".to_string(),
+            message: "오디오 파일이 필요합니다".to_string(),
+        }))
+    })?;
+
+    let audio_format = audio_format.unwrap_or(AudioFormat::Wav);
+
+    // 세션 확인
+    let mut agent = match state.get_session(&session_id).await {
+        Some(agent) => agent,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "SESSION_NOT_FOUND".to_string(),
+                    message: format!("세션 {}를 찾을 수 없습니다", session_id),
+                }),
+            ));
+        }
+    };
+
+    // Whisper API로 음성 인식
+    let whisper = OpenAIWhisper::from_env().map_err(|e| {
+        error!(error = %e, "Whisper 초기화 실패");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "WHISPER_INIT_ERROR".to_string(),
+            message: format!("음성 인식 초기화 실패: {}", e),
+        }))
+    })?;
+
+    info!(session_id = %session_id, size = audio_data.len(), "음성 인식 시작");
+
+    let transcript = whisper.transcribe_bytes(&audio_data, audio_format, session_id).await
+        .map_err(|e| {
+            error!(error = %e, "음성 인식 실패");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+                error: "TRANSCRIPTION_ERROR".to_string(),
+                message: format!("음성 인식 실패: {}", e),
+            }))
+        })?;
+
+    info!(
+        session_id = %session_id,
+        text = %transcript.text,
+        duration = transcript.duration_secs,
+        "음성 인식 완료"
+    );
+
+    // 감정 데이터 변환
+    let emotion = emotion_input.map(|e| {
+        EmotionResult::new(
+            e.to_emotion_type(),
+            e.valence,
+            e.arousal,
+            "api_input",
+            session_id,
+        )
+    });
+
+    // VLA 파이프라인 실행
+    let result = agent.process_text_input(&transcript.text, emotion);
+
+    // 세션 업데이트
+    state.update_session(&session_id, agent).await;
+
+    let coherence_score = result.psych_state.coherence_score;
+
+    Ok(Json(AudioAnalyzeResponse {
+        session_id,
+        transcript: transcript.text,
+        transcript_segments: transcript.segments.into_iter().map(|s| TranscriptSegmentDto {
+            start: s.start,
+            end: s.end,
+            text: s.text,
+        }).collect(),
+        language: transcript.language,
+        duration_secs: transcript.duration_secs,
+        triples: result.triples,
+        psych_state: result.psych_state,
+        coherence_score,
+        contradiction_detected: result.contradiction_detected,
+        alerts: result.alerts,
+        graph_summary: result.graph_summary,
     }))
 }

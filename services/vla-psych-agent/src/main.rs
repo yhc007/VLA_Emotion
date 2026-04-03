@@ -9,6 +9,7 @@ mod spo;
 mod graph;
 mod actors;
 mod api;
+mod speech;
 
 use actors::VlaPsychAgent;
 use types::*;
@@ -68,6 +69,7 @@ async fn run_server() -> anyhow::Result<()> {
     info!("   GET  /health                    - 헬스 체크");
     info!("   POST /api/v1/session/start      - 세션 시작");
     info!("   POST /api/v1/analyze/text       - 텍스트 분석");
+    info!("   POST /api/v1/analyze/audio      - 🎤 음성 분석 (Whisper)");
     info!("   GET  /api/v1/session/:id/state  - 심리 상태 조회");
     info!("   GET  /api/v1/session/:id/graph  - 그래프 조회");
     info!("");

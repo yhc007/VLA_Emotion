@@ -98,6 +98,40 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+// ─── Audio Analysis ───
+
+#[derive(Debug, Serialize)]
+pub struct AudioAnalyzeResponse {
+    pub session_id: Uuid,
+    /// 음성 인식 결과 (전체 텍스트)
+    pub transcript: String,
+    /// 세그먼트 (타임스탬프 포함)
+    pub transcript_segments: Vec<TranscriptSegmentDto>,
+    /// 인식된 언어
+    pub language: String,
+    /// 오디오 길이 (초)
+    pub duration_secs: f32,
+    /// SPO 트리플
+    pub triples: Vec<SPOTriple>,
+    /// 심리 상태
+    pub psych_state: PsychState,
+    /// 일치도
+    pub coherence_score: f32,
+    /// 말-표정 불일치
+    pub contradiction_detected: bool,
+    /// 이상 알림
+    pub alerts: Vec<AnomalyAlert>,
+    /// 그래프 요약
+    pub graph_summary: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TranscriptSegmentDto {
+    pub start: f32,
+    pub end: f32,
+    pub text: String,
+}
+
 // ─── Error ───
 
 #[derive(Debug, Serialize)]

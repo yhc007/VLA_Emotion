@@ -7,7 +7,10 @@ use axum::{
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::TraceLayer;
 
-use super::handlers::*;
+use super::handlers::{
+    health_check, start_session, analyze_text, analyze_audio,
+    get_session_state, get_session_graph,
+};
 use super::state::AppState;
 use super::websocket::{ws_handler, ws_session_handler};
 
@@ -30,6 +33,7 @@ pub fn create_router(state: AppState) -> Router {
         
         // Analysis
         .route("/api/v1/analyze/text", post(analyze_text))
+        .route("/api/v1/analyze/audio", post(analyze_audio))
         
         // WebSocket (실시간 스트리밍)
         .route("/ws", get(ws_handler))
