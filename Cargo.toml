@@ -12,6 +12,7 @@ members = [
     "services/ehs-permit-agent",
     "services/ehs-inspection-agent",
     "services/ehs-compliance-agent",
+    "services/vla-psych-agent",
 ]
 
 [workspace.package]
