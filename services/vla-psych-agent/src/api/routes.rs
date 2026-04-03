@@ -8,7 +8,7 @@ use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::TraceLayer;
 
 use super::handlers::{
-    health_check, start_session, analyze_text, analyze_audio,
+    health_check, start_session, analyze_text, analyze_audio, analyze_face,
     get_session_state, get_session_graph,
 };
 use super::state::AppState;
@@ -34,6 +34,7 @@ pub fn create_router(state: AppState) -> Router {
         // Analysis
         .route("/api/v1/analyze/text", post(analyze_text))
         .route("/api/v1/analyze/audio", post(analyze_audio))
+        .route("/api/v1/analyze/face", post(analyze_face))
         
         // WebSocket (실시간 스트리밍)
         .route("/ws", get(ws_handler))

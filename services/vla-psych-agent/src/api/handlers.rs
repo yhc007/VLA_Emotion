@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::types::EmotionResult;
 use crate::speech::{OpenAIWhisper, SpeechTranscriber, AudioFormat};
+use crate::vision::{AzureFaceApi, FaceAnalyzer, FaceAnalysisResult};
 use super::dto::*;
 use super::state::AppState;
 
@@ -319,3 +320,123 @@ pub async fn analyze_audio(
         graph_summary: result.graph_summary,
     }))
 }
+
+
+/// POST /api/v1/analyze/face
+/// 
+/// 이미지에서 표정 분석 → 감정 데이터 반환
+pub async fn analyze_face(
+    State(_state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<FaceAnalyzeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let mut session_id: Option<Uuid> = None;
+    let mut image_data: Option<Vec<u8>> = None;
+    let mut content_type: String = "image/jpeg".to_string();
+
+    // multipart 필드 파싱
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MULTIPART_ERROR".to_string(),
+            message: e.to_string(),
+        }))
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        
+        match name.as_str() {
+            "session_id" => {
+                let text = field.text().await.map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "FIELD_ERROR".to_string(),
+                        message: format!("session_id 읽기 실패: {}", e),
+                    }))
+                })?;
+                session_id = Some(Uuid::parse_str(&text).map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "INVALID_UUID".to_string(),
+                        message: format!("잘못된 session_id: {}", e),
+                    }))
+                })?);
+            }
+            "image" => {
+                if let Some(ct) = field.content_type() {
+                    content_type = ct.to_string();
+                }
+                
+                image_data = Some(field.bytes().await.map_err(|e| {
+                    (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                        error: "IMAGE_READ_ERROR".to_string(),
+                        message: format!("이미지 읽기 실패: {}", e),
+                    }))
+                })?.to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    // 필수 필드 확인
+    let session_id = session_id.unwrap_or_else(Uuid::new_v4);
+
+    let image_data = image_data.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MISSING_IMAGE".to_string(),
+            message: "이미지 파일이 필요합니다".to_string(),
+        }))
+    })?;
+
+    // Azure Face API로 표정 분석
+    let face_api = AzureFaceApi::from_env().map_err(|e| {
+        error!(error = %e, "Face API 초기화 실패");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "FACE_API_INIT_ERROR".to_string(),
+            message: format!("표정 분석 초기화 실패: {} (AZURE_FACE_ENDPOINT, AZURE_FACE_KEY 설정 필요)", e),
+        }))
+    })?;
+
+    info!(session_id = %session_id, size = image_data.len(), "표정 분석 시작");
+
+    let face_result = face_api.analyze_bytes(&image_data, &content_type, session_id).await
+        .map_err(|e| {
+            error!(error = %e, "표정 분석 실패");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+                error: "FACE_ANALYSIS_ERROR".to_string(),
+                message: format!("표정 분석 실패: {}", e),
+            }))
+        })?;
+
+    info!(
+        session_id = %session_id,
+        face_count = face_result.face_count,
+        primary_emotion = ?face_result.primary_emotion,
+        "표정 분석 완료"
+    );
+
+    // EmotionResult로 변환
+    let emotion_result = face_result.to_emotion_result("face_api");
+
+    Ok(Json(FaceAnalyzeResponse {
+        session_id,
+        face_count: face_result.face_count,
+        faces: face_result.faces.into_iter().map(|f| FaceDto {
+            face_id: f.face_id,
+            bounding_box: BoundingBoxDto {
+                x: f.bounding_box.x,
+                y: f.bounding_box.y,
+                width: f.bounding_box.width,
+                height: f.bounding_box.height,
+            },
+            emotion: format!("{:?}", f.emotion),
+            valence: f.valence,
+            arousal: f.arousal,
+            confidence: f.confidence,
+        }).collect(),
+        primary_emotion: face_result.primary_emotion.map(|e| format!("{:?}", e)),
+        primary_valence: face_result.primary_valence,
+        primary_arousal: face_result.primary_arousal,
+        emotion_input: emotion_result.map(|e| super::dto::EmotionInput {
+            emotion_type: format!("{:?}", e.emotion),
+            valence: e.valence,
+            arousal: e.arousal,
+        }),
+    }))
+}
+

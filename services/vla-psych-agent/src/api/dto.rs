@@ -32,7 +32,7 @@ pub struct AnalyzeTextRequest {
     pub emotion: Option<EmotionInput>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EmotionInput {
     pub emotion_type: String,  // "happy", "sad", "angry", etc.
     pub valence: f32,          // -1.0 ~ 1.0
@@ -130,6 +130,43 @@ pub struct TranscriptSegmentDto {
     pub start: f32,
     pub end: f32,
     pub text: String,
+}
+
+// ─── Face Analysis ───
+
+#[derive(Debug, Serialize)]
+pub struct FaceAnalyzeResponse {
+    pub session_id: Uuid,
+    /// 감지된 얼굴 수
+    pub face_count: usize,
+    /// 각 얼굴의 표정 분석
+    pub faces: Vec<FaceDto>,
+    /// 주요 감정
+    pub primary_emotion: Option<String>,
+    /// 주요 감정의 valence
+    pub primary_valence: f32,
+    /// 주요 감정의 arousal
+    pub primary_arousal: f32,
+    /// VLA 분석에 사용할 수 있는 EmotionInput 형식
+    pub emotion_input: Option<EmotionInput>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FaceDto {
+    pub face_id: String,
+    pub bounding_box: BoundingBoxDto,
+    pub emotion: String,
+    pub valence: f32,
+    pub arousal: f32,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BoundingBoxDto {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 // ─── Error ───
