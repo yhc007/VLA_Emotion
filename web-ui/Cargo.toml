@@ -1,0 +1,46 @@
+[package]
+name = "web-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+leptos = { version = "0.7", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlVideoElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "MediaDevices",
+    "MediaStream",
+    "MediaStreamConstraints",
+    "Navigator",
+    "Blob",
+    "BlobPropertyBag",
+    "FormData",
+    "Headers",
+    "Request",
+    "RequestInit",
+    "Response",
+    "WebSocket",
+    "MessageEvent",
+    "CloseEvent",
+    "ErrorEvent",
+] }
+js-sys = "0.3"
+gloo-net = "0.6"
+gloo-timers = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+console_error_panic_hook = "0.1"
+console_log = "1.0"
+log = "0.4"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLA - Problem Discovery & Solution</title>
+    
+    <!-- Pretendard (한글) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    
+    <!-- Plus Jakarta Sans (영문) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'Pretendard', 'system-ui', '-apple-system', 'sans-serif'],
+                        mono: ['SF Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'monospace'],
+                    },
+                    colors: {
+                        grok: {
+                            black: '#000000',
+                            dark: '#0a0a0a',
+                            gray: '#1a1a1a',
+                            border: '#2a2a2a',
+                            text: '#e5e5e5',
+                            muted: '#737373',
+                            blue: '#1d9bf0',
+                            'blue-hover': '#1a8cd8',
+                        }
+                    },
+                    borderRadius: {
+                        'sm': '2px',
+                        'DEFAULT': '4px',
+                        'md': '6px',
+                        'lg': '8px',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Trunk WASM -->
+    <link data-trunk rel="rust" data-wasm-opt="z" />
+    
+    <style>
+        * {
+            font-family: 'Plus Jakarta Sans', 'Pretendard', system-ui, -apple-system, sans-serif;
+        }
+        
+        .font-mono, code, pre {
+            font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+        }
+        
+        /* Grok 스타일 카드 */
+        .grok-card {
+            background: #0a0a0a;
+            border: 1px solid #2a2a2a;
+        }
+        
+        .grok-card:hover {
+            border-color: #3a3a3a;
+        }
+        
+        /* 스크롤바 - 미니멀 */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2a2a2a;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a3a3a;
+        }
+        
+        /* 버튼 트랜지션 */
+        .grok-btn {
+            transition: all 0.15s ease;
+        }
+        
+        /* 포커스 스타일 */
+        *:focus {
+            outline: 2px solid #1d9bf0;
+            outline-offset: 2px;
+        }
+        
+        /* 텍스트 선택 */
+        ::selection {
+            background: #1d9bf0;
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-grok-black text-grok-text antialiased min-h-screen">
+    <noscript>JavaScript가 필요합니다.</noscript>
+</body>
+</html>
