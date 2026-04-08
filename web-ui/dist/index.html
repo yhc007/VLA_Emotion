@@ -49,8 +49,8 @@
     <!-- Trunk WASM -->
     
 <script type="module">
-import init, * as bindings from '/web-ui-1668e8e49f93bd5c.js';
-const wasm = await init({ module_or_path: '/web-ui-1668e8e49f93bd5c_bg.wasm' });
+import init, * as bindings from '/web-ui-8706c8a952fae6fe.js';
+const wasm = await init({ module_or_path: '/web-ui-8706c8a952fae6fe_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -59,6 +59,10 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
+    
+    <!-- MediaPipe Face Mesh -->
+    
+    <script type="module" src="/face-mesh.js"></script>
     
     <style>
         * {
@@ -111,7 +115,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             color: white;
         }
     </style>
-<link rel="modulepreload" href="/web-ui-1668e8e49f93bd5c.js" crossorigin="anonymous" integrity="sha384-P1Kvv5Y87ieGYo5/GUOjoM//NufPswEau6jACjNLCg/VhIP33WVcQT658nHA3oA/"><link rel="preload" href="/web-ui-1668e8e49f93bd5c_bg.wasm" crossorigin="anonymous" integrity="sha384-Uuz0PwLKObLmLaFbwdtdAadBhrGE6WsYGlqkj/wn2UHUGvvWcYaD4q3cukLUrm+f" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/web-ui-8706c8a952fae6fe.js" crossorigin="anonymous" integrity="sha384-yvkct0TyS88sksQgaqMtBKsQIh3E6ZYNCqBDTZ3/WE5bVZShdhy9tY9G20Njb8kR"><link rel="preload" href="/web-ui-8706c8a952fae6fe_bg.wasm" crossorigin="anonymous" integrity="sha384-RqqkAcxP7FfIOBLwrEmSyo57Z7NjK1fz7btM+++coc1cqATJeGWY4anwmyyhKb+z" as="fetch" type="application/wasm"></head>
 <body class="bg-grok-black text-grok-text antialiased min-h-screen">
     <noscript>JavaScript가 필요합니다.</noscript>
 <script>"use strict";

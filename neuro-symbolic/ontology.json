@@ -1,0 +1,92 @@
+{
+  "@context": {
+    "biz": "https://vla.coreon.build/ontology/business#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+  },
+  "classes": {
+    "Problem": {
+      "description": "비즈니스 문제",
+      "subclasses": ["OperationalProblem", "StrategicProblem", "FinancialProblem", "HRProblem", "TechnicalProblem"]
+    },
+    "Cause": {
+      "description": "문제의 원인",
+      "subclasses": ["InternalCause", "ExternalCause", "ProcessCause", "ResourceCause"]
+    },
+    "Impact": {
+      "description": "문제의 영향",
+      "subclasses": ["RevenueImpact", "CostImpact", "TimeImpact", "QualityImpact", "ReputationImpact"]
+    },
+    "Solution": {
+      "description": "해결책",
+      "subclasses": ["ProcessImprovement", "ResourceAllocation", "TechSolution", "TrainingSolution", "StrategicChange"]
+    },
+    "Stakeholder": {
+      "description": "이해관계자",
+      "subclasses": ["Customer", "Employee", "Management", "Partner", "Investor"]
+    },
+    "Resource": {
+      "description": "자원",
+      "subclasses": ["HumanResource", "FinancialResource", "TechResource", "TimeResource"]
+    },
+    "Metric": {
+      "description": "측정 지표",
+      "subclasses": ["KPI", "OKR", "FinancialMetric", "OperationalMetric"]
+    }
+  },
+  "relations": {
+    "causes": {"domain": "Cause", "range": "Problem"},
+    "impacts": {"domain": "Problem", "range": "Impact"},
+    "affects": {"domain": "Impact", "range": "Stakeholder"},
+    "solves": {"domain": "Solution", "range": "Problem"},
+    "requires": {"domain": "Solution", "range": "Resource"},
+    "measures": {"domain": "Metric", "range": "Problem"},
+    "mitigates": {"domain": "Solution", "range": "Impact"},
+    "priorityOver": {"domain": "Problem", "range": "Problem"}
+  },
+  "rules": [
+    {
+      "id": "R1",
+      "name": "원인-문제 연쇄",
+      "if": "causes(X, Y) ∧ causes(Y, Z)",
+      "then": "rootCause(X, Z)",
+      "description": "원인의 원인은 근본 원인"
+    },
+    {
+      "id": "R2", 
+      "name": "해결책 우선순위",
+      "if": "solves(S, P) ∧ impacts(P, I) ∧ affects(I, Customer)",
+      "then": "highPriority(S)",
+      "description": "고객에게 영향 미치는 문제의 해결책은 우선순위 높음"
+    },
+    {
+      "id": "R3",
+      "name": "리소스 제약",
+      "if": "requires(S, R) ∧ unavailable(R)",
+      "then": "blocked(S)",
+      "description": "필요 리소스가 없으면 해결책 차단됨"
+    },
+    {
+      "id": "R4",
+      "name": "임팩트 전파",
+      "if": "impacts(P, RevenueImpact) ∧ impacts(P, TimeImpact)",
+      "then": "criticalProblem(P)",
+      "description": "수익과 시간 모두 영향 받으면 critical"
+    },
+    {
+      "id": "R5",
+      "name": "근본 원인 해결",
+      "if": "rootCause(X, P) ∧ solves(S, X)",
+      "then": "permanentSolution(S, P)",
+      "description": "근본 원인을 해결하면 영구 해결책"
+    }
+  ],
+  "examples": {
+    "entities": [
+      {"text": "매출 감소", "type": "FinancialProblem"},
+      {"text": "개발 지연", "type": "TechnicalProblem"},
+      {"text": "인력 부족", "type": "ResourceCause"},
+      {"text": "고객 이탈", "type": "RevenueImpact"},
+      {"text": "자동화 도입", "type": "TechSolution"}
+    ]
+  }
+}

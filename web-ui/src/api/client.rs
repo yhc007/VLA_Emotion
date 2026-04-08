@@ -124,3 +124,45 @@ pub async fn analyze_emotion(session_id: &str, image_data: &str) -> Result<Strin
     
     Ok(text)
 }
+
+// ── Speaker Diarization API ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpeakerSegment {
+    pub start_time: f64,
+    pub end_time: f64,
+    pub speaker_id: String,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiarizationResult {
+    pub segments: Vec<SpeakerSegment>,
+    pub num_speakers: usize,
+    pub duration: f64,
+    pub processing_time: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioChunk {
+    pub timestamp: f64,
+    pub duration: f64,
+    pub sample_rate: i32,
+    pub audio_data: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealtimeAnalysisResult {
+    pub timestamp: f64,
+    pub estimated_speaker: String,
+    pub features: Option<VoiceFeatures>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceFeatures {
+    pub f0: Option<f64>,
+    pub spectral_centroid: f64,
+    pub mfcc: Vec<f64>,
+}
+
+// Note: Python Audio Service functions removed - using Rust-based speaker diarization instead

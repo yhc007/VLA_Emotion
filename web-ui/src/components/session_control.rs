@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use crate::api::client;
+// use crate::api::client;  // TODO: 백엔드 연결 시 활성화
 use crate::components::icons;
 
 #[component]
@@ -11,30 +11,44 @@ pub fn SessionControl(
     set_show_report: WriteSignal<bool>,
 ) -> impl IntoView {
     let start_case = move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            match client::create_session().await {
-                Ok(id) => {
-                    set_case_id.set(Some(id));
-                    set_is_active.set(true);
-                    log::info!("Case started");
-                }
-                Err(e) => log::error!("Failed to start case: {}", e),
-            }
-        });
+        // Mock 모드: API 없이 로컬에서 바로 시작
+        let mock_id = format!("{:08x}", js_sys::Date::now() as u64);
+        set_case_id.set(Some(mock_id.clone()));
+        set_is_active.set(true);
+        log::info!("Case started (mock): {}", mock_id);
+        
+        // TODO: 백엔드 연결 시 아래 코드 활성화
+        // wasm_bindgen_futures::spawn_local(async move {
+        //     match client::create_session().await {
+        //         Ok(id) => {
+        //             set_case_id.set(Some(id));
+        //             set_is_active.set(true);
+        //             log::info!("Case started");
+        //         }
+        //         Err(e) => log::error!("Failed to start case: {}", e),
+        //     }
+        // });
     };
     
     let end_case = move |_| {
+        // Mock 모드: API 없이 로컬에서 바로 종료
         if let Some(id) = case_id.get() {
-            wasm_bindgen_futures::spawn_local(async move {
-                match client::end_session(&id).await {
-                    Ok(_) => {
-                        set_is_active.set(false);
-                        log::info!("Case ended");
-                    }
-                    Err(e) => log::error!("Failed to end case: {}", e),
-                }
-            });
+            set_is_active.set(false);
+            log::info!("Case ended (mock): {}", id);
         }
+        
+        // TODO: 백엔드 연결 시 아래 코드 활성화
+        // if let Some(id) = case_id.get() {
+        //     wasm_bindgen_futures::spawn_local(async move {
+        //         match client::end_session(&id).await {
+        //             Ok(_) => {
+        //                 set_is_active.set(false);
+        //                 log::info!("Case ended");
+        //             }
+        //             Err(e) => log::error!("Failed to end case: {}", e),
+        //         }
+        //     });
+        // }
     };
     
     let view_report = move |_| {

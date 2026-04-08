@@ -16,6 +16,7 @@ web-sys = { version = "0.3", features = [
     "HtmlElement",
     "HtmlVideoElement",
     "HtmlCanvasElement",
+    "HtmlInputElement",
     "CanvasRenderingContext2d",
     "MediaDevices",
     "MediaStream",
@@ -32,15 +33,48 @@ web-sys = { version = "0.3", features = [
     "MessageEvent",
     "CloseEvent",
     "ErrorEvent",
+    "File",
+    "FileList",
+    "DataTransfer",
+    "DragEvent",
+    "SpeechRecognition",
+    "SpeechRecognitionEvent",
+    "SpeechRecognitionResultList",
+    "SpeechRecognitionResult",
+    "SpeechRecognitionAlternative",
+    "SpeechSynthesis",
+    "SpeechSynthesisUtterance",
+    "AudioContext",
+    "AnalyserNode",
+    "MediaStreamAudioSourceNode",
+    "GainNode",
+    "ScriptProcessorNode",
+    "AudioProcessingEvent",
+    "AudioBuffer",
+    "AudioDestinationNode",
+    "BinaryType",
+    "ImageData",
 ] }
 js-sys = "0.3"
 gloo-net = "0.6"
-gloo-timers = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 log = "0.4"
+
+# 오디오 처리용
+rustfft = "6.0"
+ndarray = "0.15"
+apodize = "1.0"
+
+# Resemblyzer ONNX 추론 (화자 임베딩)
+tract-onnx = { version = "0.21", default-features = false }
+
+# WASM에서 getrandom 지원
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

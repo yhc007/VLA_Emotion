@@ -185,6 +185,17 @@ pub fn layers() -> impl IntoView {
     }
 }
 
+/// Upload icon
+pub fn upload() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" x2="12" y1="3" y2="15"/>
+        </svg>
+    }
+}
+
 /// Gauge icon - 상태 측정
 pub fn gauge() -> impl IntoView {
     view! {
@@ -225,6 +236,36 @@ pub fn sentiment_icon(sentiment: &str, size: u32) -> impl IntoView {
                 <line x1="8" x2="16" y1="12" y2="12"/>
             </svg>
         }.into_any(),
+    }
+}
+
+/// User icon - 화자 표시용 (small)
+pub fn user_small() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <circle cx="12" cy="8" r="4"/>
+            <path d="M20 21a8 8 0 1 0-16 0"/>
+        </svg>
+    }
+}
+
+/// User circle icon - 화자 아바타
+pub fn user_circle() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.2"/>
+            <circle cx="12" cy="9" r="3" fill="currentColor"/>
+            <path d="M12 12c-3.5 0-6 2-6 4.5V18h12v-1.5c0-2.5-2.5-4.5-6-4.5z" fill="currentColor"/>
+        </svg>
+    }
+}
+
+/// Headphones icon - 상담사
+pub fn headphones() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>
+        </svg>
     }
 }
 
