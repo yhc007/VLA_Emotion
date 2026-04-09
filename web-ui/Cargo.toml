@@ -76,5 +76,11 @@ tract-onnx = { version = "0.21", default-features = false }
 # WASM에서 getrandom 지원
 getrandom = { version = "0.2", features = ["js"] }
 
+# 시간 처리
+chrono = { version = "0.4", features = ["serde", "wasm-bindgen"] }
+
+# UUID 생성  
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

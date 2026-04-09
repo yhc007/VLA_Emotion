@@ -1,0 +1,19 @@
+{
+  "session_id": "test-session-001",
+  "start_time": "2026-04-08T08:45:00Z",
+  "end_time": "2026-04-08T08:51:21.720811Z",
+  "participant_count": 1,
+  "total_utterances": 0,
+  "total_duration_seconds": 0.0,
+  "languages": [
+    "ko-KR"
+  ],
+  "keywords": [],
+  "sentiment_summary": {
+    "dominant_sentiment": "neutral",
+    "average_confidence": 0.0,
+    "sentiment_distribution": {},
+    "emotional_volatility": 0.0
+  },
+  "problem_categories": []
+}

@@ -5,6 +5,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::app::{TranscriptEntry, SentimentData};
 use crate::components::icons;
 use crate::components::audio_visualizer::AudioVisualizer;
+use crate::storage;
 
 #[wasm_bindgen]
 extern "C" {
@@ -65,17 +66,40 @@ pub fn Transcript(
         }
     });
     
-    // 음성 인식 시작/종료
+    // 음성 인식 시작/종료 + 세션 관리
     Effect::new(move |_| {
         if is_active.get() {
             if let Some(cid) = case_id.get() {
                 log::info!("Starting speech recognition for case: {}", cid);
-                start_speech_recognition(set_transcripts, set_interim_text, set_sentiments, set_last_analysis, set_last_reasoning);
+                
+                // 세션 시작 (저장소에 등록)
+                let session_id = cid.clone();
+                spawn_local(async move {
+                    if let Some(storage) = storage::get_storage() {
+                        if let Err(e) = storage.start_session(&session_id).await {
+                            log::error!("Failed to start session {}: {}", session_id, e);
+                        }
+                    }
+                });
+                
+                start_speech_recognition(set_transcripts, set_interim_text, set_sentiments, set_last_analysis, set_last_reasoning, cid);
             }
         } else {
             set_interim_text.set(String::new());
             set_last_analysis.set(None);
             set_last_reasoning.set(None);
+            
+            // 세션 종료
+            if let Some(cid) = case_id.get() {
+                let session_id = cid.clone();
+                spawn_local(async move {
+                    if let Some(storage) = storage::get_storage() {
+                        if let Err(e) = storage.end_session(&session_id).await {
+                            log::error!("Failed to end session {}: {}", session_id, e);
+                        }
+                    }
+                });
+            }
         }
     });
     
@@ -258,29 +282,68 @@ pub fn Transcript(
                                     });
                                     set_interim_text.set(String::new());
                                     
-                                    // 분석 + 추론 실행
-                                    let text_for_analysis = text.clone();
-                                    let text_for_reasoning = text.clone();
-                                    
-                                    spawn_local(async move {
-                                        if let Ok(analysis) = analyze_text(&text_for_analysis).await {
-                                            set_last_analysis.set(Some(analysis.summary.clone()));
-                                            set_sentiments.update(|s| {
-                                                s.push(SentimentData {
-                                                    timestamp: js_sys::Date::now(),
-                                                    sentiment: analysis.sentiment,
-                                                    confidence: analysis.confidence,
+                                    // 📝 저장소에 대화 저장
+                                    if let Some(session_id) = case_id.get() {
+                                        let session_id_clone = session_id.clone();
+                                        let text_for_storage = text.clone();
+                                        spawn_local(async move {
+                                            if let Some(storage) = storage::get_storage() {
+                                                if let Err(e) = storage.append_transcript(&session_id_clone, &text_for_storage, "client").await {
+                                                    log::error!("Failed to save transcript: {}", e);
+                                                }
+                                            }
+                                        });
+                                        
+                                        // 분석 + 추론 실행
+                                        let text_for_analysis = text.clone();
+                                        let text_for_reasoning = text.clone();
+                                        let session_id_for_analysis = session_id.clone();
+                                        let session_id_for_reasoning = session_id.clone();
+                                        
+                                        spawn_local(async move {
+                                            if let Ok(analysis) = analyze_text(&text_for_analysis).await {
+                                                set_last_analysis.set(Some(analysis.summary.clone()));
+                                                set_sentiments.update(|s| {
+                                                    s.push(SentimentData {
+                                                        timestamp: js_sys::Date::now(),
+                                                        sentiment: analysis.sentiment.clone(),
+                                                        confidence: analysis.confidence,
+                                                    });
                                                 });
-                                            });
-                                        }
-                                    });
-                                    
-                                    let set_reasoning = set_last_reasoning.clone();
-                                    spawn_local(async move {
-                                        if let Ok(reasoning) = reason_text(&text_for_reasoning).await {
-                                            set_reasoning.set(Some(reasoning));
-                                        }
-                                    });
+                                                
+                                                // 📊 감정 분석 결과 저장
+                                                if let Some(storage) = storage::get_storage() {
+                                                    if let Err(e) = storage.save_sentiment_analysis(
+                                                        &session_id_for_analysis, 
+                                                        &analysis.sentiment, 
+                                                        analysis.confidence, 
+                                                        &text_for_analysis
+                                                    ).await {
+                                                        log::error!("Failed to save sentiment: {}", e);
+                                                    }
+                                                }
+                                            }
+                                        });
+                                        
+                                        let set_reasoning = set_last_reasoning.clone();
+                                        spawn_local(async move {
+                                            if let Ok(reasoning) = reason_text(&text_for_reasoning).await {
+                                                set_reasoning.set(Some(reasoning.clone()));
+                                                
+                                                // 🧠 추론 결과 저장
+                                                if let Some(storage) = storage::get_storage() {
+                                                    let reasoning_json = serde_json::to_string(&reasoning).unwrap_or_default();
+                                                    if let Err(e) = storage.save_reasoning_result(
+                                                        &session_id_for_reasoning, 
+                                                        &reasoning_json, 
+                                                        &text_for_reasoning
+                                                    ).await {
+                                                        log::error!("Failed to save reasoning: {}", e);
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
                                 }
                             }
                         >
@@ -300,6 +363,7 @@ fn start_speech_recognition(
     set_sentiments: WriteSignal<Vec<SentimentData>>,
     set_last_analysis: WriteSignal<Option<String>>,
     set_last_reasoning: WriteSignal<Option<ReasoningResult>>,
+    session_id: String,
 ) {
     use std::rc::Rc;
     use std::cell::RefCell;
@@ -324,6 +388,7 @@ fn start_speech_recognition(
     // 🔧 FIX: 처리된 결과 인덱스 추적 (중복 방지)
     let processed_index = Rc::new(RefCell::new(0u32));
     let processed_index_clone = processed_index.clone();
+    let session_id_for_result = session_id.clone();
     
     // 결과 콜백
     let on_result = Closure::wrap(Box::new(move |event: web_sys::Event| {
@@ -361,9 +426,22 @@ fn start_speech_recognition(
                                         });
                                         set_interim_text.set(String::new());
                                         
+                                        // 📝 저장소에 대화 저장
+                                        let session_id_clone = session_id_for_result.clone();
+                                        let text_for_storage = text.clone();
+                                        spawn_local(async move {
+                                            if let Some(storage) = storage::get_storage() {
+                                                if let Err(e) = storage.append_transcript(&session_id_clone, &text_for_storage, "client").await {
+                                                    log::error!("Failed to save transcript: {}", e);
+                                                }
+                                            }
+                                        });
+                                        
                                         // 🔍 문장 분석 + 🧠 Neurosymbolic 추론
                                         let text_for_analysis = text.clone();
                                         let text_for_reasoning = text.clone();
+                                        let session_id_for_analysis = session_id_for_result.clone();
+                                        let session_id_for_reasoning = session_id_for_result.clone();
                                         
                                         // 감정 분석
                                         spawn_local(async move {
@@ -373,10 +451,22 @@ fn start_speech_recognition(
                                                 set_sentiments.update(|s| {
                                                     s.push(SentimentData {
                                                         timestamp: js_sys::Date::now(),
-                                                        sentiment: analysis.sentiment,
+                                                        sentiment: analysis.sentiment.clone(),
                                                         confidence: analysis.confidence,
                                                     });
                                                 });
+                                                
+                                                // 📊 감정 분석 결과 저장
+                                                if let Some(storage) = storage::get_storage() {
+                                                    if let Err(e) = storage.save_sentiment_analysis(
+                                                        &session_id_for_analysis, 
+                                                        &analysis.sentiment, 
+                                                        analysis.confidence, 
+                                                        &text_for_analysis
+                                                    ).await {
+                                                        log::error!("Failed to save sentiment: {}", e);
+                                                    }
+                                                }
                                             }
                                         });
                                         
@@ -385,7 +475,19 @@ fn start_speech_recognition(
                                         spawn_local(async move {
                                             if let Ok(reasoning) = reason_text(&text_for_reasoning).await {
                                                 log::info!("Reasoning: {}", reasoning.summary);
-                                                set_reasoning.set(Some(reasoning));
+                                                set_reasoning.set(Some(reasoning.clone()));
+                                                
+                                                // 🧠 추론 결과 저장
+                                                if let Some(storage) = storage::get_storage() {
+                                                    let reasoning_json = serde_json::to_string(&reasoning).unwrap_or_default();
+                                                    if let Err(e) = storage.save_reasoning_result(
+                                                        &session_id_for_reasoning, 
+                                                        &reasoning_json, 
+                                                        &text_for_reasoning
+                                                    ).await {
+                                                        log::error!("Failed to save reasoning: {}", e);
+                                                    }
+                                                }
                                             }
                                         });
                                     }
@@ -421,6 +523,7 @@ fn start_speech_recognition(
     let set_sentiments_clone = set_sentiments.clone();
     let set_analysis_clone = set_last_analysis.clone();
     let set_reasoning_clone = set_last_reasoning.clone();
+    let session_id_for_restart = session_id.clone();
     
     let on_end = Closure::wrap(Box::new(move |_: web_sys::Event| {
         // 🔧 FIX: 재시작 갭 축소 (500ms → 100ms)
@@ -433,9 +536,10 @@ fn start_speech_recognition(
         let set_reas = set_reasoning_clone.clone();
         
         let window = web_sys::window().unwrap();
+        let session_id_clone = session_id_for_restart.clone();
         let closure = Closure::once(Box::new(move || {
             log::info!("Restarting speech recognition...");
-            start_speech_recognition(set_tr, set_int, set_sent, set_anal, set_reas);
+            start_speech_recognition(set_tr, set_int, set_sent, set_anal, set_reas, session_id_clone);
         }) as Box<dyn FnOnce()>);
         
         // 🔧 FIX: 100ms로 단축 (기존 500ms)
@@ -491,7 +595,7 @@ async fn analyze_text(text: &str) -> Result<AnalysisResult, String> {
 }
 
 /// Neurosymbolic 추론 결과
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ReasoningResult {
     pub input: String,
     pub entities: Vec<EntityInfo>,
@@ -502,21 +606,21 @@ pub struct ReasoningResult {
     pub summary: String,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EntityInfo {
     pub text: String,
     #[serde(rename = "type")]
     pub entity_type: String,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RelationInfo {
     pub name: String,
     pub subject: String,
     pub object: String,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SolutionInfo {
     pub name: String,
     pub problem: String,

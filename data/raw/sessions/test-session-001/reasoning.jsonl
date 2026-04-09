@@ -1,0 +1,1 @@
+{"timestamp":"2026-04-08T08:46:10Z","reasoning_result":"{\"entities\":[{\"text\":\"기분\",\"type\":\"EmotionalState\"}],\"relations\":[{\"name\":\"inquires_about\",\"subject\":\"client\",\"object\":\"기분\"}],\"solutions\":[],\"critical\":false,\"priority\":\"normal\",\"summary\":\"감정 상태에 대한 정중한 문의\"}","trigger_text":"안녕하세요, 오늘 기분이 어떠신가요?"}
