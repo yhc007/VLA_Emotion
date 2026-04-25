@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 /// 음성 인식 에러
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum TranscriberError {
     #[error("API 호출 실패: {0}")]
     ApiError(String),
@@ -64,6 +65,7 @@ impl TranscriptResult {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_confidence(mut self, confidence: f32) -> Self {
         self.confidence = confidence;
         self
@@ -104,6 +106,7 @@ impl TranscriptSegment {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_speaker(mut self, speaker_id: &str) -> Self {
         self.speaker_id = Some(speaker_id.to_string());
         self

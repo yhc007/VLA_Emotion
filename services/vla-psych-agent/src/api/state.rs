@@ -56,6 +56,7 @@ impl AppState {
     }
 
     /// 활성 세션 수
+    #[allow(dead_code)]
     pub async fn session_count(&self) -> usize {
         let sessions = self.sessions.read().await;
         sessions.len()

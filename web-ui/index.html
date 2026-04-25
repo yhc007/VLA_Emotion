@@ -46,9 +46,15 @@
         }
     </script>
     
+    <!-- Google Identity Services (OAuth2) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
     <!-- Trunk WASM -->
     <link data-trunk rel="rust" data-wasm-opt="z" />
     
+    <!-- vis.js Network (실시간 SPO 그래프) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/vis-network.min.js"></script>
+
     <!-- MediaPipe Face Mesh -->
     <link data-trunk rel="copy-file" href="public/face-mesh.js" />
     <script type="module" src="/face-mesh.js"></script>

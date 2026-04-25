@@ -33,9 +33,14 @@ pub fn VideoCapture(
     case_id: ReadSignal<Option<String>>,
     #[allow(unused)]
     set_sentiments: WriteSignal<Vec<SentimentData>>,
+    video_enabled: ReadSignal<bool>,
+    set_video_enabled: WriteSignal<bool>,
 ) -> impl IntoView {
     let video_ref = NodeRef::<leptos::html::Video>::new();
     let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
+
+    // 카메라 스트림 핸들 (토글 OFF 시 트랙 정지용)
+    let media_stream: Rc<RefCell<Option<web_sys::MediaStream>>> = Rc::new(RefCell::new(None));
     
     // 감정 분석 상태
     let (emotion, set_emotion) = signal(EmotionState::default());
@@ -53,9 +58,9 @@ pub fn VideoCapture(
     // rPPG 분석기 (Rc<RefCell>로 공유)
     let rppg_analyzer: Rc<RefCell<RppgAnalyzer>> = Rc::new(RefCell::new(RppgAnalyzer::new()));
     
-    // MediaPipe 초기화
+    // MediaPipe 초기화 (영상 분석 활성화 시에만)
     Effect::new(move |_| {
-        if is_active.get() {
+        if is_active.get() && video_enabled.get() {
             wasm_bindgen_futures::spawn_local(async move {
                 match initFaceMesh().await {
                     Ok(_) => log::info!("🦊 MediaPipe Face Mesh initialized"),
@@ -64,33 +69,65 @@ pub fn VideoCapture(
             });
         }
     });
-    
-    // 웹캠 시작
-    Effect::new(move |_| {
-        if is_active.get() {
+
+    // 웹캠 시작/정지 (is_active && video_enabled 상태에 따라)
+    {
+        let media_stream = media_stream.clone();
+        Effect::new(move |_| {
+            let should_run = is_active.get() && video_enabled.get();
             let video = video_ref.get();
-            if let Some(video_el) = video {
-                wasm_bindgen_futures::spawn_local(async move {
-                    if let Err(e) = start_camera(&video_el).await {
-                        log::error!("Camera error: {:?}", e);
+
+            if should_run {
+                if let Some(video_el) = video {
+                    let media_stream = media_stream.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        match start_camera(&video_el).await {
+                            Ok(stream) => {
+                                *media_stream.borrow_mut() = Some(stream);
+                            }
+                            Err(e) => log::error!("Camera error: {:?}", e),
+                        }
+                    });
+                }
+            } else {
+                // 카메라 트랙 정지
+                if let Some(stream) = media_stream.borrow_mut().take() {
+                    let tracks = stream.get_tracks();
+                    for i in 0..tracks.length() {
+                        if let Ok(track) = tracks.get(i).dyn_into::<web_sys::MediaStreamTrack>() {
+                            track.stop();
+                        }
                     }
-                });
+                }
+                if let Some(video_el) = video {
+                    video_el.set_src_object(None);
+                }
+                // 분석 상태 초기화
+                set_face_detected.set(false);
+                set_bpm_display.set(0.0);
+                set_confidence_display.set(0.0);
+                set_dominant.set("😐 대기중");
             }
-        }
-    });
+        });
+    }
     
     // 얼굴 분석 + rPPG 루프
     {
         let rppg = rppg_analyzer.clone();
         Effect::new(move |_| {
-            if is_active.get() && !is_analyzing.get() {
+            if is_active.get() && video_enabled.get() && !is_analyzing.get() {
                 set_is_analyzing.set(true);
                 let rppg = rppg.clone();
-                
+
                 let handle = gloo_timers::callback::Interval::new(500, move || {
+                    // 런타임에 토글이 꺼지거나 세션이 종료되면 스킵
+                    if !is_active.get() || !video_enabled.get() {
+                        return;
+                    }
+
                     let video_el = video_ref.get();
                     let canvas_el = canvas_ref.get();
-                    
+
                     if let (Some(video), Some(canvas)) = (video_el, canvas_el) {
                         let video = video.clone();
                         let canvas = canvas.clone();
@@ -202,27 +239,50 @@ pub fn VideoCapture(
                     "Client Feed"
                 </h2>
                 <div class="flex items-center gap-3">
+                    // 영상 분석 ON/OFF 토글
+                    <button
+                        type="button"
+                        on:click=move |_| set_video_enabled.update(|v| *v = !*v)
+                        class=move || {
+                            let base = "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider border transition-colors";
+                            if video_enabled.get() {
+                                format!("{} bg-grok-blue/20 border-grok-blue/40 text-grok-blue hover:bg-grok-blue/30", base)
+                            } else {
+                                format!("{} bg-grok-gray border-grok-border text-grok-muted hover:bg-grok-border", base)
+                            }
+                        }
+                        title="영상 분석 On/Off"
+                    >
+                        <div class=move || {
+                            if video_enabled.get() {
+                                "w-1.5 h-1.5 rounded-full bg-grok-blue"
+                            } else {
+                                "w-1.5 h-1.5 rounded-full bg-grok-muted"
+                            }
+                        } />
+                        {move || if video_enabled.get() { "Video On" } else { "Video Off" }}
+                    </button>
                     // 얼굴 감지 상태
-                    <Show when=move || face_detected.get()>
+                    <Show when=move || face_detected.get() && video_enabled.get()>
                         <div class="flex items-center gap-1.5 text-green-500">
                             <div class="w-1.5 h-1.5 rounded-full bg-green-500" />
                             <span class="text-xs font-mono">"Face"</span>
                         </div>
                     </Show>
                     // 긴장도 이모지
-                    <Show when=move || is_active.get() && face_detected.get()>
+                    <Show when=move || is_active.get() && face_detected.get() && video_enabled.get()>
                         <span class="text-sm" title="긴장도">
                             {move || tension_level.get().emoji()}
                         </span>
                     </Show>
                     // 지배적 감정
-                    <Show when=move || is_active.get()>
+                    <Show when=move || is_active.get() && video_enabled.get()>
                         <span class="text-xs font-mono text-grok-blue">
                             {move || dominant.get()}
                         </span>
                     </Show>
                     // LIVE 표시
-                    <Show when=move || is_active.get()>
+                    <Show when=move || is_active.get() && video_enabled.get()>
                         <div class="flex items-center gap-1.5 text-red-500">
                             <div class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                             <span class="text-xs font-mono">"LIVE"</span>
@@ -257,35 +317,46 @@ pub fn VideoCapture(
                         <p class="text-xs text-grok-muted font-mono">"Start case to begin"</p>
                     </div>
                 </Show>
-                
+
+                // 영상 분석 OFF 플레이스홀더 (세션 진행 중이지만 토글 꺼짐)
+                <Show when=move || is_active.get() && !video_enabled.get()>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center bg-grok-black/95">
+                        <div class="text-grok-muted mb-2">
+                            {icons::video()}
+                        </div>
+                        <p class="text-sm text-white font-medium mb-1">"Video Analysis Off"</p>
+                        <p class="text-xs text-grok-muted font-mono">"음성 분석만 진행 중"</p>
+                    </div>
+                </Show>
+
                 // 얼굴 분석 오버레이 (왼쪽 상단)
-                <Show when=move || is_active.get() && face_detected.get()>
-                    <FaceAnalysisOverlay 
+                <Show when=move || is_active.get() && video_enabled.get() && face_detected.get()>
+                    <FaceAnalysisOverlay
                         emotion=emotion
                         action_units=action_units
                         show_details=false
                     />
                 </Show>
-                
+
                 // 심박수 오버레이 (오른쪽 상단)
-                <Show when=move || is_active.get() && face_detected.get()>
+                <Show when=move || is_active.get() && video_enabled.get() && face_detected.get()>
                     <div class="absolute top-2 right-2">
-                        <HeartRateMini 
+                        <HeartRateMini
                             bpm=bpm_display
                             confidence=confidence_display
                         />
                     </div>
                 </Show>
-                
+
                 // 분석 오버레이 (하단)
-                <Show when=move || is_active.get()>
+                <Show when=move || is_active.get() && video_enabled.get()>
                     <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
                         <div class="flex items-center justify-between text-xs">
                             <span class="text-grok-muted font-mono">
-                                {move || if face_detected.get() { 
+                                {move || if face_detected.get() {
                                     format!("HR: {:.0} BPM | {}", bpm_display.get(), tension_level.get().label())
-                                } else { 
-                                    "Scanning...".to_string() 
+                                } else {
+                                    "Scanning...".to_string()
                                 }}
                             </span>
                             <div class="flex items-center gap-1">
@@ -301,22 +372,22 @@ pub fn VideoCapture(
 }
 
 /// 카메라 시작
-async fn start_camera(video: &HtmlVideoElement) -> Result<(), JsValue> {
+async fn start_camera(video: &HtmlVideoElement) -> Result<web_sys::MediaStream, JsValue> {
     let window = web_sys::window().unwrap();
     let navigator = window.navigator();
     let media_devices = navigator.media_devices()?;
-    
+
     let constraints = MediaStreamConstraints::new();
     constraints.set_video(&JsValue::TRUE);
     constraints.set_audio(&JsValue::FALSE);
-    
+
     let stream_promise = media_devices.get_user_media_with_constraints(&constraints)?;
     let stream = JsFuture::from(stream_promise).await?;
     let media_stream = web_sys::MediaStream::from(stream);
-    
+
     video.set_src_object(Some(&media_stream));
-    
-    Ok(())
+
+    Ok(media_stream)
 }
 
 /// ROI에서 Green 채널 평균 추출 (이마 + 양 볼)

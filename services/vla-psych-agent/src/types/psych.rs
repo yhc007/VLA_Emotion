@@ -68,6 +68,7 @@ pub struct Anomaly {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[allow(dead_code)]
 pub enum AnomalyType {
     EmotionSuddenChange,       // 감정 급변
     SpeechEmotionMismatch,     // 말-표정 불일치

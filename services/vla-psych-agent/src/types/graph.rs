@@ -159,6 +159,7 @@ impl GraphEdge {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum EdgeType {
     SpoRelation,
     TemporalNext,

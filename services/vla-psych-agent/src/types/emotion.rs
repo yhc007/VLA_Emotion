@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 // ─── 얼굴 프레임 ───
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct FaceFrame {
     pub face_data: Vec<u8>,
@@ -12,6 +13,7 @@ pub struct FaceFrame {
     pub session_id: Uuid,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BoundingBox {
     pub x: f32,
@@ -54,6 +56,7 @@ impl EmotionResult {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_confidence(mut self, confidence: f32) -> Self {
         self.confidence = confidence.clamp(0.0, 1.0);
         self
@@ -85,6 +88,7 @@ pub enum EmotionType {
     Contempt,
 }
 
+#[allow(dead_code)]
 impl EmotionType {
     /// 기본 valence 값 반환
     pub fn default_valence(&self) -> f32 {

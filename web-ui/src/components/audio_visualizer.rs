@@ -30,10 +30,19 @@ pub fn AudioVisualizer(
             let active = is_active.get();
             
             if active {
+                // 이전 오디오 리소스 정리 (재시작 시 누수 방지)
+                if let Some(old_state) = audio_state.borrow_mut().take() {
+                    let _ = old_state.audio_context.close();
+                    if let Some(ws) = &old_state.websocket {
+                        let _ = ws.close();
+                    }
+                    log::info!("Cleaned up previous audio state before restart");
+                }
+
                 // 마이크 시작 + 시각화 + VAD
                 let audio_state = audio_state.clone();
                 let canvas_ref = canvas_ref.clone();
-                
+
                 spawn_local(async move {
                     if let Some(state) = start_audio_capture_with_vad(
                         set_vad_status,
@@ -41,7 +50,7 @@ pub fn AudioVisualizer(
                         on_speech_end,
                     ).await {
                         *audio_state.borrow_mut() = Some(state.clone());
-                        
+
                         if let Some(canvas) = canvas_ref.get() {
                             start_visualization(canvas, state, speech_prob);
                         }
@@ -281,12 +290,18 @@ fn connect_vad_websocket(
 fn start_visualization(canvas: HtmlCanvasElement, state: AudioState, speech_prob: ReadSignal<f32>) {
     #[cfg(target_arch = "wasm32")]
     {
-        let ctx: CanvasRenderingContext2d = canvas
+        let ctx: CanvasRenderingContext2d = match canvas
             .get_context("2d")
             .ok()
             .flatten()
             .and_then(|c| c.dyn_into().ok())
-            .unwrap();
+        {
+            Some(ctx) => ctx,
+            None => {
+                log::warn!("Canvas context unavailable, skipping visualization");
+                return;
+            }
+        };
         
         let width = canvas.width() as f64;
         let height = canvas.height() as f64;

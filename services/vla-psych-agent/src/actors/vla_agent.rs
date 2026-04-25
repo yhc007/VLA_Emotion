@@ -30,6 +30,7 @@ pub struct VlaPsychAgent {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum VlaAgentState {
     Idle,
     ListeningAudio { session_id: Uuid },

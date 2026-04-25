@@ -15,3 +15,4 @@ pub mod vital_signs;
 pub mod audio_processing;
 pub mod speaker_diarization;
 pub mod resemblyzer;
+pub mod saved_sessions;

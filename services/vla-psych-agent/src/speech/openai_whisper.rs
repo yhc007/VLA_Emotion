@@ -17,8 +17,15 @@ pub struct OpenAIWhisper {
     api_key: String,
     model: String,
     language: Option<String>,
+    prompt: Option<String>,
+    temperature: Option<f32>,
     client: reqwest::Client,
 }
+
+/// 한국어 상담 도메인 기본 프롬프트.
+/// Whisper는 `prompt`를 음성 스타일 힌트로 사용한다. 여기에 자주 등장하는
+/// 고유명사를 나열하면 오인식을 줄일 수 있다.
+const DEFAULT_KOREAN_PROMPT: &str = "유노믹, VLA, 심리상담, 진석, 성기동, 팔로업, 출판, 신청서, 토스, 케어, 요구상품, 레이저, 팀장, 담당자, 기업, 고객.";
 
 impl OpenAIWhisper {
     const API_URL: &'static str = "https://api.openai.com/v1/audio/transcriptions";
@@ -29,6 +36,8 @@ impl OpenAIWhisper {
             api_key: api_key.to_string(),
             model: "whisper-1".to_string(),
             language: Some("ko".to_string()), // 기본 한국어
+            prompt: Some(DEFAULT_KOREAN_PROMPT.to_string()),
+            temperature: Some(0.0),
             client: reqwest::Client::new(),
         }
     }
@@ -41,14 +50,30 @@ impl OpenAIWhisper {
     }
 
     /// 언어 설정
+    #[allow(dead_code)]
     pub fn with_language(mut self, language: &str) -> Self {
         self.language = Some(language.to_string());
         self
     }
 
     /// 언어 자동 감지
+    #[allow(dead_code)]
     pub fn auto_detect_language(mut self) -> Self {
         self.language = None;
+        self
+    }
+
+    /// 프롬프트 재설정 (도메인 용어 교정)
+    #[allow(dead_code)]
+    pub fn with_prompt(mut self, prompt: &str) -> Self {
+        self.prompt = Some(prompt.to_string());
+        self
+    }
+
+    /// 프롬프트 제거
+    #[allow(dead_code)]
+    pub fn without_prompt(mut self) -> Self {
+        self.prompt = None;
         self
     }
 
@@ -72,6 +97,14 @@ impl OpenAIWhisper {
 
         if let Some(ref lang) = self.language {
             form = form.text("language", lang.clone());
+        }
+
+        if let Some(ref prompt) = self.prompt {
+            form = form.text("prompt", prompt.clone());
+        }
+
+        if let Some(temp) = self.temperature {
+            form = form.text("temperature", temp.to_string());
         }
 
         debug!(model = %self.model, "Whisper API 호출");

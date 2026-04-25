@@ -204,6 +204,7 @@ impl SemanticGraph {
     }
 
     /// 특정 엔티티의 관련 SPO 관계 조회
+    #[allow(dead_code)]
     pub fn get_entity_relations(&self, entity_id: &str) -> Vec<(&GraphEdge, &GraphNode)> {
         let mut relations = Vec::new();
 
@@ -218,6 +219,7 @@ impl SemanticGraph {
     }
 
     /// 시간 범위 내 발화 노드 조회
+    #[allow(dead_code)]
     pub fn get_utterances_in_range(
         &self,
         from: DateTime<Utc>,
@@ -231,6 +233,7 @@ impl SemanticGraph {
     }
 
     /// 최근 N개 감정 어노테이션 조회
+    #[allow(dead_code)]
     pub fn get_recent_emotions(&self, limit: usize) -> Vec<&EmotionAnnotation> {
         let mut emotions: Vec<&EmotionAnnotation> = self.graph
             .node_indices()

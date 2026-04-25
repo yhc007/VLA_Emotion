@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::types::{Entity, EntityType, Predicate, Polarity, SPOTriple};
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum SpoAssistantError {
     #[error("LLM 호출 실패: {0}")]
     LlmError(String),
@@ -21,10 +22,12 @@ pub enum SpoAssistantError {
 }
 
 /// SPO 추출 보조
+#[allow(dead_code)]
 pub struct SpoAssistant {
     client: ClaudeClient,
 }
 
+#[allow(dead_code)]
 impl SpoAssistant {
     /// 환경변수에서 설정 로드
     pub fn from_env() -> Result<Self, SpoAssistantError> {
@@ -210,6 +213,7 @@ impl SpoAssistant {
     }
 }
 
+#[allow(dead_code)]
 fn parse_entity_type(s: &str) -> EntityType {
     match s.to_lowercase().as_str() {
         "person" => EntityType::Person,
@@ -223,6 +227,7 @@ fn parse_entity_type(s: &str) -> EntityType {
 
 /// SPO 추출 결과 (JSON 파싱용)
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SpoExtractResult {
     subject: EntityDto,
     predicate: PredicateDto,
@@ -230,6 +235,7 @@ struct SpoExtractResult {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct EntityDto {
     name: String,
     #[serde(rename = "type")]
@@ -237,6 +243,7 @@ struct EntityDto {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct PredicateDto {
     verb: String,
     polarity: String,
@@ -245,6 +252,7 @@ struct PredicateDto {
 
 /// 검증 결과
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ValidationResult {
     pub is_valid: bool,
     pub issues: Vec<String>,
@@ -253,11 +261,13 @@ pub struct ValidationResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Correction {
     pub original: String,
     pub corrected: String,
 }
 
+#[allow(dead_code)]
 const SPO_SYSTEM_PROMPT: &str = r#"당신은 한국어 자연어 처리 전문가입니다.
 문장에서 SPO(주어-술어-목적어) 트리플을 정확하게 추출합니다.
 

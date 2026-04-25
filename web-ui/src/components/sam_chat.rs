@@ -45,7 +45,7 @@ pub fn SamChat() -> impl IntoView {
         {
             if let Ok(recognition) = SpeechRecognition::new() {
                 recognition.set_lang("ko-KR");
-                let _ = recognition.set_continuous(false);
+                let _ = recognition.set_continuous(true);
                 let _ = recognition.set_interim_results(true);  // interim 활성화
 
                 let set_input = set_input_text.clone();

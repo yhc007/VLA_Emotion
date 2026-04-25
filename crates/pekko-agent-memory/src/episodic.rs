@@ -157,10 +157,11 @@ mod tests {
         let store = InMemoryEpisodicStore::new();
         let episode = Episode {
             agent_id: "agent-1".to_string(),
+            session_id: uuid::Uuid::new_v4(),
             action_taken: "execute_permit_search".to_string(),
+            reasoning: "environmental query requires permit search".to_string(),
             outcome: "found 3 permits".to_string(),
             timestamp: chrono::Utc::now(),
-            context: serde_json::json!({"query": "environmental"}),
         };
 
         assert!(store.record_episode(episode).await.is_ok());
@@ -175,10 +176,11 @@ mod tests {
         for i in 0..5 {
             let episode = Episode {
                 agent_id: "agent-1".to_string(),
+                session_id: uuid::Uuid::new_v4(),
                 action_taken: format!("action-{}", i),
+                reasoning: String::new(),
                 outcome: format!("outcome-{}", i),
                 timestamp: chrono::Utc::now(),
-                context: serde_json::json!({}),
             };
             let _ = store.record_episode(episode).await;
         }
@@ -192,18 +194,20 @@ mod tests {
 
         let episode1 = Episode {
             agent_id: "agent-1".to_string(),
+            session_id: uuid::Uuid::new_v4(),
             action_taken: "permit_search".to_string(),
+            reasoning: String::new(),
             outcome: "found permits".to_string(),
             timestamp: chrono::Utc::now(),
-            context: serde_json::json!({}),
         };
 
         let episode2 = Episode {
             agent_id: "agent-1".to_string(),
+            session_id: uuid::Uuid::new_v4(),
             action_taken: "compliance_check".to_string(),
+            reasoning: String::new(),
             outcome: "checked compliance".to_string(),
             timestamp: chrono::Utc::now(),
-            context: serde_json::json!({}),
         };
 
         let _ = store.record_episode(episode1).await;
@@ -221,10 +225,11 @@ mod tests {
         for i in 0..10 {
             let episode = Episode {
                 agent_id: "agent-1".to_string(),
+                session_id: uuid::Uuid::new_v4(),
                 action_taken: "permit_search".to_string(),
+                reasoning: String::new(),
                 outcome: format!("outcome-{}", i),
                 timestamp: chrono::Utc::now(),
-                context: serde_json::json!({}),
             };
             let _ = store.record_episode(episode).await;
         }
@@ -246,18 +251,20 @@ mod tests {
 
         let episode1 = Episode {
             agent_id: "agent-1".to_string(),
+            session_id: uuid::Uuid::new_v4(),
             action_taken: "PERMIT_SEARCH".to_string(),
+            reasoning: String::new(),
             outcome: "success".to_string(),
             timestamp: chrono::Utc::now(),
-            context: serde_json::json!({}),
         };
 
         let episode2 = Episode {
             agent_id: "agent-1".to_string(),
+            session_id: uuid::Uuid::new_v4(),
             action_taken: "compliance_check".to_string(),
+            reasoning: String::new(),
             outcome: "success".to_string(),
             timestamp: chrono::Utc::now(),
-            context: serde_json::json!({}),
         };
 
         let _ = store.record_episode(episode1).await;
@@ -275,10 +282,11 @@ mod tests {
         for i in 0..5 {
             let episode = Episode {
                 agent_id: "agent-1".to_string(),
+                session_id: uuid::Uuid::new_v4(),
                 action_taken: format!("action-{}", i),
+                reasoning: String::new(),
                 outcome: format!("outcome-{}", i),
                 timestamp: chrono::Utc::now(),
-                context: serde_json::json!({}),
             };
             let _ = store.record_episode(episode).await;
         }
@@ -294,10 +302,11 @@ mod tests {
         for i in 0..10 {
             let episode = Episode {
                 agent_id: "agent-1".to_string(),
+                session_id: uuid::Uuid::new_v4(),
                 action_taken: format!("action-{}", i),
+                reasoning: String::new(),
                 outcome: format!("outcome-{}", i),
                 timestamp: chrono::Utc::now(),
-                context: serde_json::json!({}),
             };
             let _ = store.record_episode(episode).await;
         }
@@ -314,10 +323,11 @@ mod tests {
         let store = InMemoryEpisodicStore::new();
         let episode = Episode {
             agent_id: "agent-1".to_string(),
+            session_id: uuid::Uuid::new_v4(),
             action_taken: "test".to_string(),
+            reasoning: String::new(),
             outcome: "test".to_string(),
             timestamp: chrono::Utc::now(),
-            context: serde_json::json!({}),
         };
 
         let _ = store.record_episode(episode).await;

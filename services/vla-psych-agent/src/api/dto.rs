@@ -132,6 +132,17 @@ pub struct TranscriptSegmentDto {
     pub text: String,
 }
 
+// ─── Pure STT (세션 불필요) ───
+
+/// `POST /api/stt` 응답. 오디오를 받아 Whisper로 변환한 텍스트만 돌려준다.
+#[derive(Debug, Serialize)]
+pub struct SttResponse {
+    pub text: String,
+    pub language: String,
+    pub duration_secs: f32,
+    pub confidence: f32,
+}
+
 // ─── Face Analysis ───
 
 #[derive(Debug, Serialize)]

@@ -1,4 +1,5 @@
 /// VLA 전용 이벤트 타입 상수
+#[allow(dead_code)]
 pub mod vla_event_types {
     pub const SPEECH_DETECTED: &str = "vla.speech.detected";
     pub const TRANSCRIPT_READY: &str = "vla.transcript.ready";

@@ -71,7 +71,8 @@ async fn run_server() -> anyhow::Result<()> {
     info!("   GET  /health                    - 헬스 체크");
     info!("   POST /api/v1/session/start      - 세션 시작");
     info!("   POST /api/v1/analyze/text       - 텍스트 분석");
-    info!("   POST /api/v1/analyze/audio      - 🎤 음성 분석 (Whisper)");
+    info!("   POST /api/v1/analyze/audio      - 🎤 음성 분석 + VLA (Whisper + SPO)");
+    info!("   POST /api/stt                   - 🎤 순수 STT (Whisper, 프론트 실시간 녹음용)");
     info!("   POST /api/v1/analyze/face       - 😊 표정 분석 (Azure Face)");
     info!("   POST /api/v1/report/generate    - 🧠 AI 심리 리포트 (Claude)");
     info!("   POST /api/v1/counselor/suggest  - 💬 상담사 추천 응답 (Claude)");

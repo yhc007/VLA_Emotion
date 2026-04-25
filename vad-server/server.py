@@ -20,7 +20,7 @@ print("✅ Silero VAD ready!")
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 512  # 32ms at 16kHz
 SPEECH_THRESHOLD = 0.5
-SILENCE_DURATION_MS = 800  # 0.8초 침묵 후 종료
+SILENCE_DURATION_MS = 1500  # 1.5초 침묵 후 종료 (한국어 자연 쉼 고려)
 
 async def handle_client(websocket):
     """WebSocket 클라이언트 처리"""

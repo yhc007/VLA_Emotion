@@ -166,3 +166,45 @@ pub struct VoiceFeatures {
 }
 
 // Note: Python Audio Service functions removed - using Rust-based speaker diarization instead
+
+// ── Saved Sessions API ──
+
+use crate::components::saved_sessions::{SavedSessionSummary, SavedSessionData};
+
+/// 저장된 세션 목록 조회
+pub async fn fetch_session_list() -> Result<Vec<SavedSessionSummary>, String> {
+    let response = Request::get(&format!("{}/sessions", API_BASE))
+        .send()
+        .await
+        .map_err(|e| format!("세션 목록 조회 실패: {}", e))?;
+
+    if !response.ok() {
+        return Err(format!("서버 에러: {}", response.status()));
+    }
+
+    let sessions: Vec<SavedSessionSummary> = response
+        .json()
+        .await
+        .map_err(|e| format!("응답 파싱 실패: {}", e))?;
+
+    Ok(sessions)
+}
+
+/// 특정 세션 데이터 로드
+pub async fn fetch_session_data(session_id: &str) -> Result<SavedSessionData, String> {
+    let response = Request::get(&format!("{}/sessions/{}/data", API_BASE, session_id))
+        .send()
+        .await
+        .map_err(|e| format!("세션 데이터 로드 실패: {}", e))?;
+
+    if !response.ok() {
+        return Err(format!("서버 에러: {}", response.status()));
+    }
+
+    let data: SavedSessionData = response
+        .json()
+        .await
+        .map_err(|e| format!("응답 파싱 실패: {}", e))?;
+
+    Ok(data)
+}

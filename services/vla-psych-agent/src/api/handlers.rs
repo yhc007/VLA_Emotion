@@ -322,8 +322,103 @@ pub async fn analyze_audio(
 }
 
 
+/// POST /api/stt
+///
+/// 순수 STT: 오디오를 받아 Whisper로 변환한 텍스트만 반환한다.
+/// 세션이나 VLA 분석 없이 프론트엔드 실시간 녹음 → 텍스트 경로에서 쓰인다.
+pub async fn transcribe_audio(
+    State(_state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<SttResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let mut audio_data: Option<Vec<u8>> = None;
+    let mut audio_format: Option<AudioFormat> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MULTIPART_ERROR".to_string(),
+            message: e.to_string(),
+        }))
+    })? {
+        if field.name() == Some("audio") {
+            if let Some(filename) = field.file_name() {
+                let ext = std::path::Path::new(filename)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("webm");
+                audio_format = AudioFormat::from_extension(ext);
+            }
+            if audio_format.is_none() {
+                if let Some(ct) = field.content_type() {
+                    audio_format = match ct {
+                        "audio/webm" | "audio/webm;codecs=opus" => Some(AudioFormat::Webm),
+                        "audio/ogg" | "audio/ogg;codecs=opus" => Some(AudioFormat::Ogg),
+                        "audio/mp4" | "audio/m4a" => Some(AudioFormat::M4a),
+                        "audio/wav" | "audio/x-wav" => Some(AudioFormat::Wav),
+                        "audio/mpeg" | "audio/mp3" => Some(AudioFormat::Mp3),
+                        _ => None,
+                    };
+                }
+            }
+
+            audio_data = Some(field.bytes().await.map_err(|e| {
+                (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                    error: "AUDIO_READ_ERROR".to_string(),
+                    message: format!("오디오 읽기 실패: {}", e),
+                }))
+            })?.to_vec());
+        }
+    }
+
+    let audio_data = audio_data.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "MISSING_AUDIO".to_string(),
+            message: "오디오 파일이 필요합니다 (field: audio)".to_string(),
+        }))
+    })?;
+
+    let audio_format = audio_format.unwrap_or(AudioFormat::Webm);
+
+    let whisper = OpenAIWhisper::from_env().map_err(|e| {
+        error!(error = %e, "Whisper 초기화 실패");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+            error: "WHISPER_INIT_ERROR".to_string(),
+            message: format!("음성 인식 초기화 실패: {} (OPENAI_API_KEY 환경변수 확인)", e),
+        }))
+    })?;
+
+    info!(size = audio_data.len(), format = ?audio_format, "STT 요청 수신");
+
+    // session_id는 의미 없지만 API 시그니처상 필요 → 랜덤 UUID
+    let ephemeral_session = Uuid::new_v4();
+
+    let transcript = whisper
+        .transcribe_bytes(&audio_data, audio_format, ephemeral_session)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "음성 인식 실패");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+                error: "TRANSCRIPTION_ERROR".to_string(),
+                message: format!("음성 인식 실패: {}", e),
+            }))
+        })?;
+
+    info!(
+        text_len = transcript.text.len(),
+        duration = transcript.duration_secs,
+        "STT 완료: {}",
+        transcript.text,
+    );
+
+    Ok(Json(SttResponse {
+        text: transcript.text,
+        language: transcript.language,
+        duration_secs: transcript.duration_secs,
+        confidence: transcript.confidence,
+    }))
+}
+
 /// POST /api/v1/analyze/face
-/// 
+///
 /// 이미지에서 표정 분석 → 감정 데이터 반환
 pub async fn analyze_face(
     State(_state): State<AppState>,

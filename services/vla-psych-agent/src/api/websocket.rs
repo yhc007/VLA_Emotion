@@ -79,6 +79,7 @@ pub enum WsServerMessage {
     },
     /// 이상 알림 (실시간 푸시)
     #[serde(rename = "alert")]
+    #[allow(dead_code)]
     Alert {
         alert_type: String,
         severity: String,

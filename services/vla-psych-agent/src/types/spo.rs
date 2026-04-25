@@ -91,6 +91,7 @@ impl Entity {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum EntityType {
     Person,
     Organization,
@@ -130,11 +131,13 @@ impl Predicate {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_tense(mut self, tense: Tense) -> Self {
         self.tense = tense;
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_modality(mut self, modality: Modality) -> Self {
         self.modality = modality;
         self
@@ -142,6 +145,7 @@ impl Predicate {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[allow(dead_code)]
 pub enum Tense {
     Past,
     Present,
@@ -156,6 +160,7 @@ pub enum Polarity {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[allow(dead_code)]
 pub enum Modality {
     Declarative,  // 평서: "~이다"
     Interrogative, // 의문: "~인가?"
@@ -166,6 +171,7 @@ pub enum Modality {
 
 // ─── 음성 세그먼트 ───
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SpeechSegment {
     pub audio_bytes: Vec<u8>,
@@ -176,6 +182,7 @@ pub struct SpeechSegment {
 
 // ─── STT 결과 ───
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TranscriptResult {
     pub text: String,
@@ -186,6 +193,7 @@ pub struct TranscriptResult {
     pub language: String,
 }
 
+#[allow(dead_code)]
 impl TranscriptResult {
     pub fn new(text: &str, speaker_id: &str, session_id: Uuid, confidence: f32) -> Self {
         Self {

@@ -5,6 +5,7 @@ mod api;
 mod components;
 mod types;
 mod storage;
+pub mod google;
 
 fn main() {
     console_error_panic_hook::set_once();

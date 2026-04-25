@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 use crate::components::{
     video_capture::VideoCapture,
     sentiment_display::SentimentDisplay,
@@ -8,10 +9,12 @@ use crate::components::{
     document_upload::{DocumentUpload, UploadedDoc},
     timeline::{Timeline, TimelineMarker, MarkerType},
     speaker_diarization::SpeakerDiarization,
+    saved_sessions::{SavedSessions, LoadedSessionResult},
     icons,
     sam_chat::SamChat,
     reasoning_graph::ReasoningGraph,
 };
+use crate::google::{GoogleSheets, GoogleDrive, auth::GoogleLoginButton, drive::format_session_markdown};
 
 /// Case 상태
 #[derive(Clone, Debug, Default)]
@@ -44,6 +47,9 @@ pub fn App() -> impl IntoView {
     let (sentiments, set_sentiments) = signal(Vec::<SentimentData>::new());
     let (transcripts, set_transcripts) = signal(Vec::<TranscriptEntry>::new());
     let (show_report, set_show_report) = signal(false);
+
+    // 영상 분석 활성화 토글 (OFF일 때 음성만 분석)
+    let (video_enabled, set_video_enabled) = signal(true);
     
     // Neurosymbolic 추론 결과
     let (reasoning_result, set_reasoning_result) = signal(Option::<ReasoningResult>::None);
@@ -55,12 +61,56 @@ pub fn App() -> impl IntoView {
     // MediaSet 상태
     let (documents, set_documents) = signal(Vec::<UploadedDoc>::new());
     let (timeline_markers, set_timeline_markers) = signal(Vec::<TimelineMarker>::new());
+
+    // 저장된 세션 불러오기 상태
+    let (show_saved_sessions, set_show_saved_sessions) = signal(false);
+    let (loaded_session, set_loaded_session) = signal(Option::<LoadedSessionResult>::None);
+    let (is_replay_mode, set_is_replay_mode) = signal(false);
     
     // 타임라인 시간 추적
     let (start_time, set_start_time) = signal(0.0_f64);
     let (current_ms, set_current_ms) = signal(0_u64);
     let (duration_ms, set_duration_ms) = signal(0_u64);
     
+    // ── 저장된 세션 불러오기 Effect ──
+    Effect::new(move |_| {
+        if let Some(loaded) = loaded_session.get() {
+            // 1. 패널 닫기
+            set_show_saved_sessions.set(false);
+
+            // 2. 기존 케이스 활성 해제
+            set_is_active.set(false);
+            set_is_replay_mode.set(true);
+
+            // 3. 케이스 ID 설정
+            set_case_id.set(Some(loaded.session_id.clone()));
+
+            // 4. 대화 기록 로드
+            set_transcripts.set(loaded.transcripts.clone());
+
+            // 5. 감정 데이터 로드
+            set_sentiments.set(loaded.sentiments.clone());
+
+            // 6. 추론 결과 로드
+            if let Some(reasoning) = &loaded.reasoning {
+                set_reasoning_result.set(Some(reasoning.clone()));
+            }
+
+            // 7. 타임라인 마커 로드
+            set_timeline_markers.set(loaded.timeline_markers.clone());
+
+            // 8. 시간 설정
+            set_duration_ms.set(loaded.duration_ms);
+            set_current_ms.set(loaded.duration_ms); // 끝까지 표시
+
+            log::info!("Session loaded: {} ({} transcripts, {} sentiments)",
+                loaded.session_id,
+                loaded.transcripts.len(),
+                loaded.sentiments.len(),
+            );
+        }
+    });
+
     // 케이스 시작 시 타임라인 초기화
     Effect::new(move |_| {
         if is_active.get() {
@@ -249,6 +299,184 @@ pub fn App() -> impl IntoView {
         }
     });
     
+    // ── Google 연동 상태 ──
+    // TODO: Google Cloud Console에서 OAuth2 Client ID를 발급받아 교체하세요
+    let google_client_id = "712685283607-jitjm9avh4dk087umvir8o2r8rg91mh0.apps.googleusercontent.com".to_string();
+    let (google_logged_in, set_google_logged_in) = signal(false);
+    let (google_token, set_google_token) = signal(Option::<String>::None);
+    let (google_sheet_id, set_google_sheet_id) = signal(Option::<String>::None);
+    let (google_sheet_url, set_google_sheet_url) = signal(Option::<String>::None);
+    let (google_folder_id, set_google_folder_id) = signal(Option::<String>::None);
+    let (google_sync_status, set_google_sync_status) = signal("idle".to_string());
+
+    // Google 로그인 콜백
+    let on_google_login = Callback::new(move |token: String| {
+        set_google_token.set(Some(token.clone()));
+        set_google_logged_in.set(true);
+        log::info!("Google auth token set");
+
+        // Drive 폴더 초기화
+        spawn_local(async move {
+            let drive = GoogleDrive::new(&token);
+            match drive.get_or_create_vla_folder().await {
+                Ok(folder_id) => {
+                    set_google_folder_id.set(Some(folder_id));
+                    log::info!("Google Drive VLA folder ready");
+                }
+                Err(e) => log::error!("Failed to init Drive folder: {}", e),
+            }
+        });
+    });
+
+    // 케이스 시작 시 Google Sheet 자동 생성
+    Effect::new(move |_| {
+        if is_active.get() {
+            if let (Some(cid), Some(token)) = (case_id.get(), google_token.get()) {
+                let date = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+                let date_short = date.split('T').next().unwrap_or(&date).to_string();
+                set_google_sync_status.set("creating sheet...".to_string());
+
+                spawn_local(async move {
+                    let sheets = GoogleSheets::new(&token);
+                    match sheets.create_session_spreadsheet(&cid, &date_short).await {
+                        Ok((sid, url)) => {
+                            log::info!("Google Sheet created: {}", url);
+                            set_google_sheet_id.set(Some(sid.clone()));
+                            set_google_sheet_url.set(Some(url));
+                            set_google_sync_status.set("syncing".to_string());
+
+                            // 시트를 VLA 폴더로 이동
+                            if let Some(folder_id) = google_folder_id.get_untracked() {
+                                let drive = GoogleDrive::new(&token);
+                                if let Err(e) = drive.move_to_folder(&sid, &folder_id).await {
+                                    log::warn!("Failed to move sheet to folder: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to create sheet: {}", e);
+                            set_google_sync_status.set(format!("error: {}", e));
+                        }
+                    }
+                });
+            }
+        }
+    });
+
+    // 트랜스크립트 추가 시 Google Sheets 실시간 동기화
+    Effect::new(move |prev_count: Option<usize>| {
+        let entries = transcripts.get();
+        let count = entries.len();
+
+        if let Some(prev) = prev_count {
+            if count > prev {
+                if let (Some(sheet_id), Some(token)) = (google_sheet_id.get(), google_token.get()) {
+                    let new_entries: Vec<_> = entries[prev..].to_vec();
+                    spawn_local(async move {
+                        let sheets = GoogleSheets::new(&token);
+                        for entry in &new_entries {
+                            let ts = {
+                                let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(entry.timestamp));
+                                d.to_locale_time_string("ko-KR").as_string().unwrap_or_default()
+                            };
+                            if let Err(e) = sheets.append_transcript(&sheet_id, &ts, &entry.speaker, &entry.text).await {
+                                log::warn!("Sheets sync error: {}", e);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        count
+    });
+
+    // 감정 데이터 추가 시 Google Sheets 동기화
+    Effect::new(move |prev_count: Option<usize>| {
+        let sents = sentiments.get();
+        let count = sents.len();
+
+        if let Some(prev) = prev_count {
+            if count > prev {
+                if let (Some(sheet_id), Some(token)) = (google_sheet_id.get(), google_token.get()) {
+                    let new_sents: Vec<_> = sents[prev..].to_vec();
+                    spawn_local(async move {
+                        let sheets = GoogleSheets::new(&token);
+                        for s in &new_sents {
+                            let ts = {
+                                let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(s.timestamp));
+                                d.to_locale_time_string("ko-KR").as_string().unwrap_or_default()
+                            };
+                            if let Err(e) = sheets.append_sentiment(&sheet_id, &ts, &s.sentiment, s.confidence, "").await {
+                                log::warn!("Sheets sentiment sync error: {}", e);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        count
+    });
+
+    // 케이스 종료 시 Google Drive에 리포트 업로드
+    Effect::new(move |was_active: Option<bool>| {
+        let active = is_active.get();
+
+        // active → inactive 전환 감지
+        if was_active == Some(true) && !active {
+            if let (Some(token), Some(folder_id), Some(cid)) =
+                (google_token.get(), google_folder_id.get(), case_id.get())
+            {
+                let transcripts_data: Vec<_> = transcripts.get_untracked().iter().map(|t| {
+                    let ts = {
+                        let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(t.timestamp));
+                        d.to_locale_time_string("ko-KR").as_string().unwrap_or_default()
+                    };
+                    (ts, t.speaker.clone(), t.text.clone())
+                }).collect();
+
+                let sentiments_data: Vec<_> = sentiments.get_untracked().iter().map(|s| {
+                    let ts = {
+                        let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(s.timestamp));
+                        d.to_locale_time_string("ko-KR").as_string().unwrap_or_default()
+                    };
+                    (ts, s.sentiment.clone(), s.confidence)
+                }).collect();
+
+                let date = js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default();
+                let date_short = date.split('T').next().unwrap_or(&date).to_string();
+
+                set_google_sync_status.set("uploading report...".to_string());
+                spawn_local(async move {
+                    let drive = GoogleDrive::new(&token);
+
+                    // 마크다운 리포트 업로드
+                    let md = format_session_markdown(
+                        &cid,
+                        &date_short,
+                        &transcripts_data,
+                        &sentiments_data,
+                        None,
+                    );
+
+                    match drive.upload_session_summary(&folder_id, &cid, &date_short, &md).await {
+                        Ok((_, url)) => {
+                            log::info!("Report uploaded: {}", url);
+                            set_google_sync_status.set("saved".to_string());
+                        }
+                        Err(e) => {
+                            log::error!("Report upload failed: {}", e);
+                            set_google_sync_status.set(format!("error: {}", e));
+                        }
+                    }
+                });
+            }
+        }
+
+        active
+    });
+
     // 대화 내용 추가 시 마커 생성 (화자 발화 기록)
     Effect::new(move |prev_count: Option<usize>| {
         let entries = transcripts.get();
@@ -310,12 +538,50 @@ pub fn App() -> impl IntoView {
                             </p>
                         </div>
                     </div>
-                    <div class="flex items-center gap-2 text-xs text-grok-muted font-mono">
+                    <div class="flex items-center gap-3 text-xs text-grok-muted font-mono">
+                        // Google 로그인 + 동기화 상태
+                        <GoogleLoginButton
+                            client_id=google_client_id.clone()
+                            on_login=on_google_login
+                            is_logged_in=google_logged_in
+                        />
+                        <Show when=move || google_logged_in.get()>
+                            {move || {
+                                let status = google_sync_status.get();
+                                let (color, icon) = match status.as_str() {
+                                    "syncing" => ("text-green-400", "~"),
+                                    "saved" => ("text-green-400", "v"),
+                                    "idle" => ("text-gray-500", "-"),
+                                    s if s.starts_with("error") => ("text-red-400", "!"),
+                                    _ => ("text-yellow-400", "*"),
+                                };
+                                view! {
+                                    <span class=format!("text-[10px] {}", color)>
+                                        {format!("[{}] {}", icon, status)}
+                                    </span>
+                                }
+                            }}
+                        </Show>
+                        // Google Sheets 링크
+                        <Show when=move || google_sheet_url.get().is_some()>
+                            <a
+                                href=move || google_sheet_url.get().unwrap_or_default()
+                                target="_blank"
+                                class="text-[10px] text-grok-blue hover:underline"
+                            >"Sheet"</a>
+                        </Show>
+
+                        // 리플레이 모드 표시
+                        <Show when=move || is_replay_mode.get()>
+                            <span class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-xs font-medium border border-amber-500/30">
+                                "REPLAY"
+                            </span>
+                        </Show>
                         <div class="w-1.5 h-1.5 rounded-full bg-green-500" />
                         "System Online"
                         // 경과 시간 표시
-                        <Show when=move || is_active.get()>
-                            <span class="ml-2 text-grok-blue">
+                        <Show when=move || is_active.get() || is_replay_mode.get()>
+                            <span class="ml-1 text-grok-blue">
                                 {move || {
                                     let ms = current_ms.get();
                                     let secs = ms / 1000;
@@ -328,14 +594,29 @@ pub fn App() -> impl IntoView {
                     </div>
                 </header>
                 
-                // Case 컨트롤
-                <SessionControl
-                    case_id=case_id
-                    is_active=is_active
-                    set_case_id=set_case_id
-                    set_is_active=set_is_active
-                    set_show_report=set_show_report
-                />
+                // Case 컨트롤 + 녹음 불러오기
+                <div class="flex items-center gap-3">
+                    <div class="flex-1">
+                        <SessionControl
+                            case_id=case_id
+                            is_active=is_active
+                            set_case_id=set_case_id
+                            set_is_active=set_is_active
+                            set_show_report=set_show_report
+                        />
+                    </div>
+                    // 저장된 녹음 불러오기 버튼
+                    <Show when=move || !is_active.get()>
+                        <button
+                            on:click=move |_| set_show_saved_sessions.set(true)
+                            class="grok-btn flex items-center gap-2 px-4 py-2.5 bg-grok-gray hover:bg-grok-border text-white text-sm font-medium rounded-md border border-grok-border transition-colors"
+                            title="Load saved recording"
+                        >
+                            {icons::folder_open()}
+                            <span class="hidden sm:inline">"Load Recording"</span>
+                        </button>
+                    </Show>
+                </div>
                 
                 // 메인 그리드 (3컬럼)
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
@@ -345,6 +626,8 @@ pub fn App() -> impl IntoView {
                             is_active=is_active
                             case_id=case_id
                             set_sentiments=set_sentiments
+                            video_enabled=video_enabled
+                            set_video_enabled=set_video_enabled
                         />
                         <SentimentDisplay sentiments=sentiments />
                     </div>
@@ -383,12 +666,17 @@ pub fn App() -> impl IntoView {
                 
                 // 타임라인 (전체 너비)
                 <div class="mt-4">
-                    <Timeline
-                        markers=timeline_markers
-                        duration_ms=duration_ms
-                        current_ms=current_ms
-                        on_seek=None
-                    />
+                    {
+                        let on_seek: Option<Box<dyn Fn(u64)>> = None;
+                        view! {
+                            <Timeline
+                                markers=timeline_markers
+                                duration_ms=duration_ms
+                                current_ms=current_ms
+                                on_seek=on_seek
+                            />
+                        }
+                    }
                 </div>
                 
                 // 푸터
@@ -404,6 +692,14 @@ pub fn App() -> impl IntoView {
                     <ReportViewer
                         case_id=case_id
                         on_close=move |_| set_show_report.set(false)
+                    />
+                </Show>
+
+                // 저장된 세션 불러오기 모달
+                <Show when=move || show_saved_sessions.get()>
+                    <SavedSessions
+                        on_load=set_loaded_session
+                        on_close=Callback::new(move |_| set_show_saved_sessions.set(false))
                     />
                 </Show>
             </div>

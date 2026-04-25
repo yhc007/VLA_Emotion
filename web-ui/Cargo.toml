@@ -20,7 +20,12 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "MediaDevices",
     "MediaStream",
+    "MediaStreamTrack",
     "MediaStreamConstraints",
+    "MediaRecorder",
+    "MediaRecorderOptions",
+    "RecordingState",
+    "BlobEvent",
     "Navigator",
     "Blob",
     "BlobPropertyBag",
@@ -54,6 +59,7 @@ web-sys = { version = "0.3", features = [
     "AudioDestinationNode",
     "BinaryType",
     "ImageData",
+    "FileReader",
 ] }
 js-sys = "0.3"
 gloo-net = "0.6"
@@ -64,6 +70,9 @@ serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 log = "0.4"
+
+# WASM 단일 스레드 환경에서 !Send 타입을 Send로 노출 (Leptos Callback 경계)
+send_wrapper = "0.6"
 
 # 오디오 처리용
 rustfft = "6.0"

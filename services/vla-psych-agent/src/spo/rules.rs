@@ -62,6 +62,7 @@ pub const AUXILIARY_VERB_MARKERS: &[&str] = &[
 ];
 
 /// 복합 술어 연결 어미: "~ㄹ까", "~하려고", "~하고 싶" 등
+#[allow(dead_code)]
 pub const COMPOUND_PRED_CONNECTORS: &[&str] = &[
     "ㄹ까", "을까", "울까",     // 의지/추측: "그만둘까"
     "려고", "하려고",           // 의도: "하려고"

@@ -10,6 +10,7 @@ use tower_http::trace::TraceLayer;
 use super::handlers::{
     health_check, start_session, analyze_text, analyze_audio, analyze_face,
     get_session_state, get_session_graph, generate_report, suggest_counselor_response,
+    transcribe_audio,
 };
 use super::state::AppState;
 use super::websocket::{ws_handler, ws_session_handler};
@@ -35,6 +36,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/analyze/text", post(analyze_text))
         .route("/api/v1/analyze/audio", post(analyze_audio))
         .route("/api/v1/analyze/face", post(analyze_face))
+
+        // Pure STT (프론트엔드 실시간 녹음용)
+        .route("/api/stt", post(transcribe_audio))
         
         // LLM-powered
         .route("/api/v1/report/generate", post(generate_report))

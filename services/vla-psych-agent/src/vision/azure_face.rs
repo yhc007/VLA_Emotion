@@ -245,8 +245,10 @@ struct AzureEmotion {
 // ─── 간단한 Mock 구현 (테스트/개발용) ───
 
 /// Mock Face Analyzer (개발/테스트용)
+#[allow(dead_code)]
 pub struct MockFaceAnalyzer;
 
+#[allow(dead_code)]
 impl MockFaceAnalyzer {
     pub fn new() -> Self {
         Self
@@ -254,6 +256,7 @@ impl MockFaceAnalyzer {
 }
 
 #[async_trait]
+#[allow(dead_code)]
 impl FaceAnalyzer for MockFaceAnalyzer {
     async fn analyze_file(
         &self,
@@ -285,6 +288,7 @@ impl FaceAnalyzer for MockFaceAnalyzer {
     }
 }
 
+#[allow(dead_code)]
 impl MockFaceAnalyzer {
     fn mock_result(&self, session_id: Uuid) -> FaceAnalysisResult {
         // 랜덤하게 감정 생성 (테스트용)
@@ -306,6 +310,7 @@ impl MockFaceAnalyzer {
     }
 }
 
+#[allow(dead_code)]
 impl Default for MockFaceAnalyzer {
     fn default() -> Self {
         Self::new()

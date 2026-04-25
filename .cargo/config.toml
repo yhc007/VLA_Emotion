@@ -1,0 +1,4 @@
+# Project-local Cargo config
+# sccache는 일시 비활성화 (서버 hang 이슈). 필요 시 재활성화.
+# [build]
+# rustc-wrapper = "sccache"

@@ -344,7 +344,7 @@ def analyze(text: str, api_key: Optional[str] = None) -> Dict:
     # 3. 추론 실행
     result = reasoner.get_result()
     
-    return {
+    analysis = {
         "input": text,
         "entities": [{"text": e.text, "type": e.type} for e in entities],
         "relations": [{"name": r.name, "subject": r.subject, "object": r.object} for r in relations],
@@ -354,6 +354,17 @@ def analyze(text: str, api_key: Optional[str] = None) -> Dict:
         "priority": result.priority,
         "summary": generate_summary(entities, relations, result)
     }
+
+    # 그래프 데이터 첨부 (graph_visualizer 사용 가능 시)
+    try:
+        from graph_visualizer import SPOGraphBuilder
+        builder = SPOGraphBuilder()
+        builder.build_from_analysis(entities, relations, result.inferred)
+        analysis["graph"] = builder.to_json()
+    except ImportError:
+        analysis["graph"] = None
+
+    return analysis
 
 
 def generate_summary(entities, relations, result) -> str:
@@ -390,17 +401,35 @@ def generate_summary(entities, relations, result) -> str:
 # CLI
 if __name__ == "__main__":
     import sys
-    
-    if len(sys.argv) > 1:
-        text = " ".join(sys.argv[1:])
+
+    args = sys.argv[1:]
+    generate_graph = False
+
+    if "--graph" in args:
+        generate_graph = True
+        args.remove("--graph")
+
+    if args:
+        text = " ".join(args)
     else:
         text = "인력 부족 때문에 프로젝트가 지연되고 있어서 자동화 도입을 검토 중입니다"
-    
+
     print(f"📝 입력: {text}\n")
     result = analyze(text)
-    
+
     print("=" * 50)
     print(result["summary"])
     print("=" * 50)
     print(f"\n📊 상세 결과:")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+    # --graph 옵션: HTML 시각화 생성
+    if generate_graph:
+        try:
+            from graph_visualizer import analyze_and_visualize
+            viz = analyze_and_visualize(text)
+            print(f"\n📈 SPO 그래프 생성 완료:")
+            print(f"   HTML: {viz['html_path']}")
+            print(f"   JSON: {viz['json_path']}")
+        except ImportError as e:
+            print(f"\n⚠️ 그래프 시각화 실패: {e}")

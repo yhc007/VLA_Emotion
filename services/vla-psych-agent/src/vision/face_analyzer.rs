@@ -12,6 +12,7 @@ use crate::types::EmotionType;
 
 /// 표정 분석 에러
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum FaceAnalyzerError {
     #[error("API 호출 실패: {0}")]
     ApiError(String),
@@ -60,6 +61,7 @@ impl FaceAnalysisResult {
         }
     }
 
+    #[allow(dead_code)]
     pub fn single(face: FaceEmotion, session_id: Uuid) -> Self {
         Self {
             face_count: 1,
@@ -254,6 +256,7 @@ pub trait FaceAnalyzer: Send + Sync {
 
 /// 이미지 형식
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ImageFormat {
     Jpeg,
     Png,
@@ -262,6 +265,7 @@ pub enum ImageFormat {
     Webp,
 }
 
+#[allow(dead_code)]
 impl ImageFormat {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
