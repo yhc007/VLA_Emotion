@@ -220,7 +220,16 @@ fn connect_vad_websocket(
 ) -> Option<WebSocket> {
     #[cfg(target_arch = "wasm32")]
     {
-        let ws = WebSocket::new("ws://localhost:8085").ok()?;
+        // Origin-relative WebSocket URL — page protocol(http/https)에 따라 ws/wss 자동 선택.
+        // dev: Trunk proxy(/vad-ws → ws://127.0.0.1:8085), prod: cloudflared ingress(/vad-ws → :8085).
+        let ws_url = {
+            let location = web_sys::window()?.location();
+            let proto = if location.protocol().ok()? == "https:" { "wss:" } else { "ws:" };
+            let host = location.host().ok()?;
+            format!("{}//{}/vad-ws", proto, host)
+        };
+        log::info!("Connecting VAD WebSocket: {}", ws_url);
+        let ws = WebSocket::new(&ws_url).ok()?;
         ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
         
         // 메시지 수신

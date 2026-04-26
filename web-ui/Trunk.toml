@@ -10,6 +10,21 @@ address = "127.0.0.1"
 port = 8081
 open = false
 
+# ── 백엔드 프록시 ──
+# 모든 코드 호출이 origin-relative(`/api/*`, `/ws*`, `/vad-ws`)로 통일되어
+# dev(Trunk) / prod(cloudflared) 환경 모두 동일한 path 구조로 동작.
+
+# vla-psych-agent REST: /api/v1/*, /api/stt, /api/analyze, /api/reason 등.
 [[proxy]]
 rewrite = "/api/"
 backend = "http://127.0.0.1:8080/api/"
+
+# vla-psych-agent WebSocket: /ws, /ws/:id (실시간 세션 스트리밍).
+[[proxy]]
+rewrite = "/ws"
+backend = "ws://127.0.0.1:8080/ws"
+
+# Silero VAD WebSocket (Python sidecar, :8085) — 코드는 /vad-ws로 접속.
+[[proxy]]
+rewrite = "/vad-ws"
+backend = "ws://127.0.0.1:8085/"

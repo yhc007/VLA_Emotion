@@ -2,20 +2,29 @@ use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
-use web_sys::{Blob, BlobEvent, FormData, MediaRecorder, MediaRecorderOptions, MediaStream};
+use web_sys::{AudioBuffer, AudioContext, Blob, BlobEvent, FormData, MediaRecorder, MediaRecorderOptions, MediaStream};
 use send_wrapper::SendWrapper;
+use gloo_timers::callback::Interval;
 use std::cell::RefCell;
 use std::rc::Rc;
 use crate::app::{TranscriptEntry, SentimentData};
 use crate::components::icons;
 use crate::components::audio_visualizer::AudioVisualizer;
+use crate::components::resemblyzer::ResemblyzerEngine;
 use crate::storage;
 
 /// 백엔드 STT 엔드포인트.
-const STT_ENDPOINT: &str = "http://localhost:8080/api/stt";
+/// Origin-relative — `vla.coreon.build`(production) / `localhost:8081`(Trunk dev) / SSH 터널 모두 동일하게 동작.
+/// dev에서는 Trunk.toml의 `[[proxy]] /api/`가 8080으로 포워딩하고,
+/// production에서는 cloudflared ingress가 같은 path를 8080으로 라우팅한다.
+const STT_ENDPOINT: &str = "/api/stt";
 
 /// MediaRecorder 선호 MIME 타입 (WebM/Opus는 Whisper가 직접 지원).
 const RECORDER_MIME: &str = "audio/webm;codecs=opus";
+
+/// Interim flush 주기 — 발화 중에도 이 간격으로 partial 텍스트를 표시.
+/// 짧을수록 latency 줄지만 Whisper 호출 빈도와 boundary cut 위험 증가.
+const INTERIM_INTERVAL_MS: u32 = 2000;
 
 /// 녹음기 세션 상태 — speech_end 콜백과 MediaRecorder 사이에서 공유.
 #[derive(Clone, Default)]
@@ -24,6 +33,21 @@ struct RecorderSlot {
     stream: Rc<RefCell<Option<MediaStream>>>,
     /// 현재 녹음 세그먼트의 Blob 청크들.
     chunks: Rc<RefCell<Vec<Blob>>>,
+    /// 현재 발화에서 interim flush로 누적한 텍스트. speech_end 시 한 번에 transcripts로 확정.
+    pending_text: Rc<RefCell<String>>,
+    /// 현재 발화에서 interim flush로 누적한 16kHz f32 mono PCM.
+    /// speech_end 시 이 전체를 ResemblyzerEngine::identify_speaker에 넘겨 화자 식별.
+    pending_pcm: Rc<RefCell<Vec<f32>>>,
+    /// 동시 flush 가드 — 진행 중이면 새 interim 호출은 스킵해 recorder 상태 꼬임 방지.
+    flushing: Rc<RefCell<bool>>,
+    /// 주기적 interim flush 타이머. Drop 시 setInterval 자동 해제 (RAII).
+    interim_timer: Rc<RefCell<Option<Interval>>>,
+}
+
+/// flush_recorder_and_transcribe 반환 — STT 결과 + 화자 식별용 PCM.
+struct FlushOutput {
+    text: Option<String>,
+    pcm_16k: Option<Vec<f32>>,
 }
 
 /// Whisper STT 응답 — 백엔드 `SttResponse`와 동일 스키마.
@@ -57,6 +81,11 @@ pub fn Transcript(
     let (last_analysis, set_last_analysis) = signal(Option::<String>::None);
     // 마지막 추론 결과 (내부 + 외부 연동)
     let (last_reasoning, set_last_reasoning) = signal(Option::<ReasoningResult>::None);
+
+    // 화자 식별 엔진 — Resemblyzer ONNX 임베딩 + 코사인 유사도 매칭.
+    // 컴포넌트 인스턴스 하나당 한 엔진을 유지해 발화 간 화자 레지스트리(speaker_embeddings)를 누적.
+    // ONNX 모델 자체는 resemblyzer.rs의 `static MODEL: OnceLock`으로 전역 1회만 로드.
+    let resemblyzer = Rc::new(RefCell::new(ResemblyzerEngine::new()));
     
     // 외부 signal 연동
     Effect::new(move |_| {
@@ -95,6 +124,17 @@ pub fn Transcript(
                             log::error!("Failed to start recorder: {}", e);
                         }
                     });
+
+                    // Interim flush 타이머 — 2초마다 현재 chunk를 Whisper로 보내고
+                    // pending_text에 누적, interim_text 시그널을 갱신해 라이브 표시.
+                    let timer_slot = recorder_slot.clone();
+                    let interval = Interval::new(INTERIM_INTERVAL_MS, move || {
+                        let slot = timer_slot.clone();
+                        spawn_local(async move {
+                            run_interim_flush(&slot, set_interim_text).await;
+                        });
+                    });
+                    *recorder_slot.interim_timer.borrow_mut() = Some(interval);
                 }
             } else {
                 set_interim_text.set(String::new());
@@ -119,109 +159,161 @@ pub fn Transcript(
         });
     }
 
-    // VAD의 speech_end 이벤트 콜백 — 녹음 세그먼트를 잘라 Whisper로 전송
+    // VAD의 speech_end 이벤트 콜백 — 발화의 마지막 chunk를 변환하고
+    // interim flush로 누적된 pending_text/pending_pcm과 합쳐 한 번에 transcripts로 확정한다.
+    // 누적 PCM으로 ResemblyzerEngine에 화자 식별을 요청, 결과를 transcript 엔트리에 반영.
     //
     // Leptos의 `Callback`은 `Send + Sync` 경계를 요구하지만, 우리가 캡처하는
-    // `RecorderSlot`은 `Rc<RefCell<_>>`와 web_sys 타입을 담고 있어 `!Send`이다.
+    // `RecorderSlot`/`Rc<RefCell<ResemblyzerEngine>>`은 `!Send`이다.
     // WASM 단일 스레드 환경이므로 `SendWrapper`로 감싸 경계만 통과시킨다.
     let on_speech_end = {
         let wrapped_slot = SendWrapper::new(recorder_slot.clone());
+        let wrapped_resemblyzer = SendWrapper::new(resemblyzer.clone());
         Callback::new(move |_| {
             // 콜백은 반응형 컨텍스트 밖이므로 untracked 읽기
             let cid_opt = case_id.get_untracked();
             let slot = wrapped_slot.clone().take();
+            let engine = wrapped_resemblyzer.clone().take();
             let set_transcripts = set_transcripts.clone();
             let set_sentiments = set_sentiments.clone();
             let set_last_analysis = set_last_analysis.clone();
             let set_last_reasoning = set_last_reasoning.clone();
 
             spawn_local(async move {
-                match flush_recorder_and_transcribe(&slot).await {
-                    Ok(Some(text)) => {
-                        log::info!("🎤 Whisper: {}", text);
-                        let ts = js_sys::Date::now();
-                        set_transcripts.update(|entries| {
-                            entries.push(TranscriptEntry {
-                                timestamp: ts,
-                                text: text.clone(),
-                                speaker: "client".to_string(),
-                            });
-                        });
+                // 1. 마지막 tail audio (직전 interim flush 이후 0~2s) 변환.
+                //    Interim과 동시 호출되면 flushing 가드 풀릴 때까지 짧게 yield.
+                while *slot.flushing.borrow() {
+                    gloo_timers::future::TimeoutFuture::new(20).await;
+                }
+                *slot.flushing.borrow_mut() = true;
+                let tail = flush_recorder_and_transcribe(&slot).await;
+                *slot.flushing.borrow_mut() = false;
 
-                        if let Some(cid) = cid_opt {
-                            // 저장소에 저장 + 분석 + 추론
-                            let session_id = cid.clone();
-                            let text_clone = text.clone();
-                            spawn_local(async move {
-                                if let Some(storage) = storage::get_storage() {
-                                    if let Err(e) = storage.append_transcript(&session_id, &text_clone, "client").await {
-                                        log::error!("Failed to save transcript: {}", e);
-                                    }
+                match tail {
+                    Ok(out) => {
+                        if let Some(pcm) = out.pcm_16k {
+                            slot.pending_pcm.borrow_mut().extend_from_slice(&pcm);
+                        }
+                        if let Some(text) = out.text {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let mut pending = slot.pending_text.borrow_mut();
+                                if !pending.is_empty() {
+                                    pending.push(' ');
                                 }
-                            });
-
-                            let text_for_analysis = text.clone();
-                            let session_for_analysis = cid.clone();
-                            spawn_local(async move {
-                                if let Ok(analysis) = analyze_text(&text_for_analysis).await {
-                                    set_last_analysis.set(Some(analysis.summary.clone()));
-                                    set_sentiments.update(|s| {
-                                        s.push(SentimentData {
-                                            timestamp: js_sys::Date::now(),
-                                            sentiment: analysis.sentiment.clone(),
-                                            confidence: analysis.confidence,
-                                        });
-                                    });
-                                    if let Some(storage) = storage::get_storage() {
-                                        if let Err(e) = storage
-                                            .save_sentiment_analysis(
-                                                &session_for_analysis,
-                                                &analysis.sentiment,
-                                                analysis.confidence,
-                                                &text_for_analysis,
-                                            )
-                                            .await
-                                        {
-                                            log::error!("Failed to save sentiment: {}", e);
-                                        }
-                                    }
-                                }
-                            });
-
-                            let text_for_reasoning = text.clone();
-                            let session_for_reasoning = cid.clone();
-                            spawn_local(async move {
-                                if let Ok(reasoning) = reason_text(&text_for_reasoning).await {
-                                    set_last_reasoning.set(Some(reasoning.clone()));
-                                    if let Some(storage) = storage::get_storage() {
-                                        let reasoning_json =
-                                            serde_json::to_string(&reasoning).unwrap_or_default();
-                                        if let Err(e) = storage
-                                            .save_reasoning_result(
-                                                &session_for_reasoning,
-                                                &reasoning_json,
-                                                &text_for_reasoning,
-                                            )
-                                            .await
-                                        {
-                                            log::error!("Failed to save reasoning: {}", e);
-                                        }
-                                    }
-                                }
-                            });
+                                pending.push_str(trimmed);
+                            }
                         }
                     }
-                    Ok(None) => {
-                        log::debug!("Speech end fired but no audio accumulated yet");
-                    }
-                    Err(e) => {
-                        log::error!("STT pipeline error: {}", e);
-                    }
+                    Err(e) => log::error!("STT pipeline error: {}", e),
+                }
+
+                // 2. 누적된 발화 전체를 확정하고 interim 표시 클리어.
+                let final_text = std::mem::take(&mut *slot.pending_text.borrow_mut());
+                let final_pcm = std::mem::take(&mut *slot.pending_pcm.borrow_mut());
+                set_interim_text.set(String::new());
+                let final_text = final_text.trim().to_string();
+                if final_text.is_empty() {
+                    log::debug!("Speech end: no text accumulated");
+                    return;
+                }
+
+                log::info!("🎤 Whisper (final): {}", final_text);
+
+                // 3. 화자 식별 — 누적 PCM 전체를 ResemblyzerEngine에 넘김.
+                //    None 반환(오디오 너무 짧거나 임베딩 실패) 시 current_speaker prop fallback,
+                //    그것도 None이면 "client"로 최종 fallback.
+                let speaker_from_engine = if final_pcm.len() >= 16000 / 2 {
+                    // 최소 0.5초 이상 PCM일 때만 식별 시도 (짧으면 fallback embedding이 None 반환).
+                    engine.borrow_mut().identify_speaker(&final_pcm)
+                } else {
+                    None
+                };
+                let speaker = speaker_from_engine
+                    .or_else(|| current_speaker.and_then(|s| s.get_untracked()))
+                    .unwrap_or_else(|| "client".to_string());
+                log::info!("👤 Speaker: {} (PCM {} samples)", speaker, final_pcm.len());
+                let ts = js_sys::Date::now();
+                set_transcripts.update(|entries| {
+                    entries.push(TranscriptEntry {
+                        timestamp: ts,
+                        text: final_text.clone(),
+                        speaker: speaker.clone(),
+                    });
+                });
+
+                // 3. 저장 + 분석 + 추론 — 누적된 전체 발화를 한 번에 처리.
+                if let Some(cid) = cid_opt {
+                    let session_id = cid.clone();
+                    let text_clone = final_text.clone();
+                    let speaker_for_storage = speaker.clone();
+                    spawn_local(async move {
+                        if let Some(storage) = storage::get_storage() {
+                            if let Err(e) = storage.append_transcript(&session_id, &text_clone, &speaker_for_storage).await {
+                                log::error!("Failed to save transcript: {}", e);
+                            }
+                        }
+                    });
+
+                    let text_for_analysis = final_text.clone();
+                    let session_for_analysis = cid.clone();
+                    spawn_local(async move {
+                        if let Ok(analysis) = analyze_text(&text_for_analysis).await {
+                            set_last_analysis.set(Some(analysis.summary.clone()));
+                            set_sentiments.update(|s| {
+                                s.push(SentimentData {
+                                    timestamp: js_sys::Date::now(),
+                                    sentiment: analysis.sentiment.clone(),
+                                    confidence: analysis.confidence,
+                                });
+                            });
+                            if let Some(storage) = storage::get_storage() {
+                                if let Err(e) = storage
+                                    .save_sentiment_analysis(
+                                        &session_for_analysis,
+                                        &analysis.sentiment,
+                                        analysis.confidence,
+                                        &text_for_analysis,
+                                    )
+                                    .await
+                                {
+                                    log::error!("Failed to save sentiment: {}", e);
+                                }
+                            }
+                        }
+                    });
+
+                    let text_for_reasoning = final_text.clone();
+                    let session_for_reasoning = cid.clone();
+                    spawn_local(async move {
+                        if let Ok(reasoning) = reason_text(&text_for_reasoning).await {
+                            set_last_reasoning.set(Some(reasoning.clone()));
+                            if let Some(storage) = storage::get_storage() {
+                                let reasoning_json =
+                                    serde_json::to_string(&reasoning).unwrap_or_default();
+                                if let Err(e) = storage
+                                    .save_reasoning_result(
+                                        &session_for_reasoning,
+                                        &reasoning_json,
+                                        &text_for_reasoning,
+                                    )
+                                    .await
+                                {
+                                    log::error!("Failed to save reasoning: {}", e);
+                                }
+                            }
+                        }
+                    });
                 }
             });
         })
     };
-    
+
+    // 수동 분석 버튼이 interim_text를 확정할 때 pending_text도 같이 비워야
+    // 다음 speech_end가 같은 텍스트를 한 번 더 push하지 않는다.
+    // Leptos view 클로저는 Send/Sync를 요구하므로 !Send인 Rc는 SendWrapper로 통과.
+    let pending_text_for_button = SendWrapper::new(recorder_slot.pending_text.clone());
+
     view! {
         <div class="grok-card rounded-md p-4 h-full flex flex-col">
             <h2 class="text-xs font-medium text-grok-muted uppercase tracking-wider flex items-center gap-2 mb-3">
@@ -388,27 +480,39 @@ pub fn Transcript(
                                 }
                             }
                             disabled=move || interim_text.get().is_empty()
-                            on:click=move |_| {
+                            on:click={
+                                // 부모 children-closure가 Fn이어야 하므로
+                                // 클릭 클로저 진입 직전에 SendWrapper를 한 번 clone해 그 사본만 move.
+                                let pending = pending_text_for_button.clone();
+                                move |_| {
                                 let text = interim_text.get();
                                 if !text.is_empty() {
+                                    // SpeakerDiarization 결과 반영 — speech_end 경로와 동일한 fallback 정책.
+                                    let speaker = current_speaker
+                                        .and_then(|s| s.get_untracked())
+                                        .unwrap_or_else(|| "client".to_string());
                                     // 최종 결과로 처리
                                     let text_clone = text.clone();
+                                    let speaker_clone = speaker.clone();
                                     set_transcripts.update(|entries| {
                                         entries.push(TranscriptEntry {
                                             timestamp: js_sys::Date::now(),
                                             text: text_clone,
-                                            speaker: "client".to_string(),
+                                            speaker: speaker_clone,
                                         });
                                     });
                                     set_interim_text.set(String::new());
-                                    
+                                    // pending_text도 비워야 다음 speech_end가 중복 push하지 않음
+                                    pending.clone().take().borrow_mut().clear();
+
                                     // 📝 저장소에 대화 저장
                                     if let Some(session_id) = case_id.get() {
                                         let session_id_clone = session_id.clone();
                                         let text_for_storage = text.clone();
+                                        let speaker_for_storage = speaker.clone();
                                         spawn_local(async move {
                                             if let Some(storage) = storage::get_storage() {
-                                                if let Err(e) = storage.append_transcript(&session_id_clone, &text_for_storage, "client").await {
+                                                if let Err(e) = storage.append_transcript(&session_id_clone, &text_for_storage, &speaker_for_storage).await {
                                                     log::error!("Failed to save transcript: {}", e);
                                                 }
                                             }
@@ -465,6 +569,7 @@ pub fn Transcript(
                                         });
                                     }
                                 }
+                            }
                             }
                         >
                             "🔍 분석하기"
@@ -543,6 +648,9 @@ fn build_recorder(stream: &MediaStream, slot: &RecorderSlot) -> Result<MediaReco
 
 /// 세션 종료 시 MediaRecorder와 MediaStream을 깨끗이 해제.
 fn stop_recorder(slot: &RecorderSlot) {
+    // Interim 타이머 먼저 해제 — drop 시 setInterval 자동 cancel.
+    slot.interim_timer.borrow_mut().take();
+
     if let Some(recorder) = slot.recorder.borrow_mut().take() {
         if recorder.state() == web_sys::RecordingState::Recording {
             let _ = recorder.stop();
@@ -557,11 +665,56 @@ fn stop_recorder(slot: &RecorderSlot) {
         }
     }
     slot.chunks.borrow_mut().clear();
+    slot.pending_text.borrow_mut().clear();
+    slot.pending_pcm.borrow_mut().clear();
+    *slot.flushing.borrow_mut() = false;
 }
 
-/// VAD speech_end 시 호출 — 현재까지 녹음된 Blob을 모아 Whisper로 보내고,
+/// 주기적 interim flush — 2초마다 현재 chunk를 Whisper STT + PCM 디코드 후
+/// pending_text/pending_pcm에 누적. interim_text 시그널을 라이브로 갱신.
+/// 화자 식별은 여기서 안 함 (interim은 짧고 발화 단위로 묶어 speech_end에서 한 번에 처리).
+/// 동시 flush(speech_end와 충돌 등)는 `flushing` 가드로 스킵.
+async fn run_interim_flush(slot: &RecorderSlot, set_interim_text: WriteSignal<String>) {
+    if *slot.flushing.borrow() {
+        return;
+    }
+    // chunk가 아직 없으면(녹음 막 시작) 굳이 stop/restart 비용을 치를 필요 없음.
+    if slot.recorder.borrow().is_none() {
+        return;
+    }
+    *slot.flushing.borrow_mut() = true;
+    let result = flush_recorder_and_transcribe(slot).await;
+    *slot.flushing.borrow_mut() = false;
+
+    let Ok(out) = result else { return };
+
+    // PCM은 텍스트 유무와 무관하게 누적 (잠깐의 무음/잡음에서도 화자 임베딩에 기여).
+    if let Some(pcm) = out.pcm_16k {
+        slot.pending_pcm.borrow_mut().extend_from_slice(&pcm);
+    }
+
+    if let Some(text) = out.text {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let snapshot = {
+            let mut pending = slot.pending_text.borrow_mut();
+            if !pending.is_empty() {
+                pending.push(' ');
+            }
+            pending.push_str(trimmed);
+            pending.clone()
+        };
+        log::debug!("Interim flush: {}", snapshot);
+        set_interim_text.set(snapshot);
+    }
+}
+
+/// VAD speech_end / 주기적 interim flush 시 호출 — 현재까지 녹음된 Blob을 모아
+/// (a) Whisper STT 변환 + (b) 화자 식별용 16kHz PCM 디코드 둘 다 수행하고,
 /// 다음 발화를 위해 새 MediaRecorder를 즉시 재시작한다.
-async fn flush_recorder_and_transcribe(slot: &RecorderSlot) -> Result<Option<String>, String> {
+async fn flush_recorder_and_transcribe(slot: &RecorderSlot) -> Result<FlushOutput, String> {
     // 1. 현재 녹음기 중지 → ondataavailable이 마지막 청크를 push할 때까지 onstop 대기
     let old_recorder = slot.recorder.borrow_mut().take();
     if let Some(recorder) = old_recorder {
@@ -575,7 +728,7 @@ async fn flush_recorder_and_transcribe(slot: &RecorderSlot) -> Result<Option<Str
     if chunks.is_empty() {
         // 다음 발화를 위해 재시작만 하고 반환
         restart_recorder(slot)?;
-        return Ok(None);
+        return Ok(FlushOutput { text: None, pcm_16k: None });
     }
 
     let blob_parts = js_sys::Array::new();
@@ -591,13 +744,71 @@ async fn flush_recorder_and_transcribe(slot: &RecorderSlot) -> Result<Option<Str
     // 3. 다음 발화를 위해 녹음 재시작 (네트워크 지연과 병렬)
     restart_recorder(slot)?;
 
-    // 4. Whisper로 업로드
-    let text = upload_to_whisper(combined).await?;
-    if text.trim().is_empty() {
-        Ok(None)
+    // 4. PCM 디코드 (화자 식별용) — 실패해도 STT는 계속 시도.
+    //    Blob.array_buffer는 데이터를 소비하지 않으므로 같은 Blob을 STT 업로드에도 재사용 가능.
+    let pcm_16k = match decode_blob_to_pcm_16k(&combined).await {
+        Ok(pcm) => Some(pcm),
+        Err(e) => {
+            log::warn!("PCM decode failed (화자 식별 스킵): {}", e);
+            None
+        }
+    };
+
+    // 5. Whisper로 업로드
+    let text_raw = upload_to_whisper(combined).await?;
+    let text = if text_raw.trim().is_empty() { None } else { Some(text_raw) };
+
+    Ok(FlushOutput { text, pcm_16k })
+}
+
+/// WebM/Opus Blob을 디코드하고 16kHz f32 mono PCM으로 변환.
+/// AudioContext.decodeAudioData가 컨테이너 포맷을 자동 인식 (Opus/WebM/MP3 등).
+/// AudioBuffer의 sample_rate는 source rate (보통 MediaRecorder는 48000Hz) → 16kHz로 다운샘플.
+async fn decode_blob_to_pcm_16k(blob: &Blob) -> Result<Vec<f32>, String> {
+    // Blob → ArrayBuffer
+    let array_buffer_promise = blob.array_buffer();
+    let array_buffer: js_sys::ArrayBuffer = JsFuture::from(array_buffer_promise)
+        .await
+        .map_err(|e| format!("blob.arrayBuffer: {:?}", e))?
+        .dyn_into()
+        .map_err(|_| "ArrayBuffer cast failed".to_string())?;
+
+    // AudioContext 생성 후 decodeAudioData. 디코드 후 close.
+    let ctx = AudioContext::new().map_err(|e| format!("AudioContext::new: {:?}", e))?;
+    let decode_promise = ctx
+        .decode_audio_data(&array_buffer)
+        .map_err(|e| format!("decode_audio_data start: {:?}", e))?;
+    let buffer: AudioBuffer = JsFuture::from(decode_promise)
+        .await
+        .map_err(|e| format!("decode_audio_data await: {:?}", e))?
+        .dyn_into()
+        .map_err(|_| "AudioBuffer cast failed".to_string())?;
+
+    let source_rate = buffer.sample_rate();
+    let pcm = buffer
+        .get_channel_data(0)
+        .map_err(|e| format!("getChannelData: {:?}", e))?;
+    let _ = ctx.close();
+
+    if (source_rate - 16000.0).abs() < 1.0 {
+        Ok(pcm)
     } else {
-        Ok(Some(text))
+        Ok(downsample_to_16k(&pcm, source_rate))
     }
+}
+
+/// 단순 nearest-neighbor 다운샘플 (resemblyzer.rs/speaker_diarization.rs와 동일 알고리즘).
+/// 화자 임베딩에는 nearest-neighbor로 충분 (anti-aliasing은 정확도에 거의 영향 없음).
+fn downsample_to_16k(audio: &[f32], source_rate: f32) -> Vec<f32> {
+    let target_rate = 16000.0;
+    let ratio = source_rate / target_rate;
+    let target_len = (audio.len() as f32 / ratio) as usize;
+    (0..target_len)
+        .map(|i| {
+            let src_idx = (i as f32 * ratio) as usize;
+            audio.get(src_idx).copied().unwrap_or(0.0)
+        })
+        .collect()
 }
 
 /// MediaRecorder.stop()을 호출하고 onstop 이벤트를 대기.
@@ -679,8 +890,8 @@ async fn analyze_text(text: &str) -> Result<AnalysisResult, String> {
         "timestamp": js_sys::Date::now()
     });
     
-    // 직접 API 서버 호출 (프록시 우회)
-    let response = Request::post("http://localhost:8080/api/analyze")
+    // Origin-relative — Trunk proxy / cloudflared ingress가 8080으로 포워딩.
+    let response = Request::post("/api/analyze")
         .header("Content-Type", "application/json")
         .body(body.to_string())
         .map_err(|e| e.to_string())?
@@ -739,8 +950,8 @@ pub async fn reason_text(text: &str) -> Result<ReasoningResult, String> {
         "text": text
     });
     
-    // 직접 API 서버 호출 (프록시 우회)
-    let response = Request::post("http://localhost:8080/api/reason")
+    // Origin-relative — Trunk proxy / cloudflared ingress가 8080으로 포워딩.
+    let response = Request::post("/api/reason")
         .header("Content-Type", "application/json")
         .body(body.to_string())
         .map_err(|e| e.to_string())?
